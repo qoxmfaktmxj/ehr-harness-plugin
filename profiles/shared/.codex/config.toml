@@ -1,0 +1,5 @@
+# Codex CLI 프로젝트 설정
+# AGENTS.md를 기본으로 읽고, CLAUDE.md도 폴백으로 읽는다
+
+[project]
+project_doc_fallback_filenames = ["CLAUDE.md"]

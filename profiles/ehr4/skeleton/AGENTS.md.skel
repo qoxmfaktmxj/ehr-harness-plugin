@@ -1,0 +1,111 @@
+# EHR4 ({{SYSTEM_NAME}}) 프로젝트 규칙
+
+Oracle 프로시저 중심의 레거시 인사시스템.
+Java 8 · Spring MVC · Anyframe Query Mapping · Velocity · IBSheet7 · Oracle.
+빌드: Ant / 코어: isu-core-1.0.jar
+
+---
+
+## 경로 규칙
+
+| 종류 | 경로 |
+|------|------|
+| Java | `src/com/hr/{module}/` |
+| Mapper | `src/com/hr/{module}/.../` (`*-mapping-query.xml`) |
+| JSP | `WebContent/WEB-INF/jsp/{module}/` |
+
+---
+
+## 디스패처 패턴 — 4 법칙
+
+모든 화면은 `.do` + `cmd=` 디스패치 패턴으로 동작한다.
+
+### Law A — 전용 컨트롤러 (Direct WHERE)
+전용 컨트롤러 → 전용 매퍼 쿼리. WHERE 조건을 직접 작성.
+- 단건 조회/저장처럼 단순하고 권한 분기가 없는 화면.
+
+### Law B — 공통 컨트롤러 (Auth Injection)
+`GetDataList.do` / `SaveData.do` 공통 컨트롤러.
+`F_COM_GET_SQL_AUTH` 함수로 `$query` 변수를 주입 → Velocity `$query`/`${query}` 로 쿼리 조합.
+- 권한별 뷰 분기가 필요한 조회 목록 화면.
+
+### Law C — 하이브리드
+전용 컨트롤러 + `AuthTableService` 주입.
+`AuthTableService.getAuthQueryMap()` 결과를 직접 사용.
+- 중간 복잡도; 권한 분기 + 커스텀 로직. {{LAW_C_COUNT}}개 컨트롤러가 사용.
+
+### Law D — ExecPrc (프로시저 호출)
+`ExecPrc.do` + `ProDao` + `CALLABLE`.
+OUT 파라미터 `sqlCode` / `sqlErrm` 로 결과 수신.
+- 저장/계산/승인 등 프로시저 실행.
+
+---
+
+## 모듈 맵
+
+{{MODULE_MAP}}
+
+---
+
+## 기술 규칙
+
+### DI / 매퍼
+- DI: `@Autowired` 권장 (기존 파일이 `@Inject @Named` 쓰면 해당 파일 패턴 따르기)
+- 매퍼 파일명: `*-mapping-query.xml`
+- Velocity 바인딩: `:key` (안전 바인딩), `$var` (문자열 치환), `$query`/`${query}` (권한 주입)
+- 결과값 참조: `$result.variable` (Velocity 확장)
+
+### DAO 메서드 (typo 유지)
+`getList` · `getMap` · `getOne` · `create` · `update` · `delete` · `excute`
+
+### 세션 변수
+{{SESSION_VARS}}
+
+### MERGE 패턴 (Velocity)
+```xml
+MERGE INTO target_table USING (
+  #foreach($item in $list)
+    SELECT :col1_${velocityCount} col1 FROM DUAL
+    #if($velocityHasNext) UNION ALL #end
+  #end
+) src ON (...)
+WHEN MATCHED THEN UPDATE ...
+WHEN NOT MATCHED THEN INSERT ...
+```
+
+### DELETE 패턴
+sentinel 레코드 + `#foreach` 루프로 IN 절 구성.
+
+### 프로시저 OUT 파라미터
+`sqlCode` / `sqlErrm` → CALLABLE 방식 수신.
+
+---
+
+## 에러 메시지 (한국어 필수)
+"저장 되었습니다." · "조회에 실패 하였습니다." · "삭제 되었습니다."
+
+---
+
+## 치명 프로시저 (사용자 직접 승인 필요)
+
+{{CRITICAL_PROC}}
+
+AI는 위 프로시저를 직접 수정하지 않는다.
+
+---
+
+## 금지 사항
+
+- MyBatis, JPA, Hibernate
+- React / Vue (레거시 화면)
+- 영어 에러 메시지
+- 회사 코드 하드코딩 (반드시 `:ssnEnterCd`)
+- 그린필드 구현 (기존 화면 복제 기반)
+
+---
+
+## 참고
+
+- DB 오브젝트 소스는 저장소에 없음 (Oracle 서버에서만 조회 가능).
+- 프로시저/함수/트리거/더미 데이터는 **사용자가 직접 생성**.
+- AI는 SQL 스크립트를 **파일로 작성**하여 제공 (직접 실행 금지).

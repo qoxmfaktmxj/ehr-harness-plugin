@@ -1,0 +1,118 @@
+---
+name: codebase-navigator
+description: "EHR4 코드베이스 탐색 및 에러 진단 스킬. '어디에 있어', '찾아줘', '메뉴 찾기', '에러 원인', '로직 어디', '화면 찾기', '테이블 찾기', '쿼리 찾기' 등의 키워드에 트리거. 자연어 질문에서 코드 경로를 찾을 때 반드시 이 스킬을 사용한다."
+---
+
+# Codebase Navigator — EHR4 코드 탐색 스킬
+
+## 모듈 맵
+
+{{MODULE_MAP}}
+
+---
+
+## 자연어 → 코드 경로 찾기
+
+### Step 1: 키워드에서 모듈 특정
+
+```
+"연차 신청" → tim/ 또는 hri/
+"급여 계산" → cpn/
+"인사 발령" → hrm/
+"결재 승인" → hri/
+"경조금 신청" → ben/
+"권한 설정" → sys/
+"조직도" → org/
+```
+
+### Step 2: 파일 찾기 명령어
+
+```bash
+# 컨트롤러 찾기 (키워드 기반)
+grep -r "class.*{키워드}.*Controller" --include="*.java" src/com/hr/ -l
+
+# URL 매핑으로 찾기
+grep -r "@RequestMapping.*{URL}" --include="*.java" src/com/hr/ -l
+
+# 매퍼 쿼리 ID로 찾기
+grep -r "id=\"{쿼리ID}\"" --include="*-mapping-query.xml" src/com/hr/ -l
+
+# 테이블명으로 관련 매퍼 찾기
+grep -r "{테이블명}" --include="*-mapping-query.xml" src/com/hr/ -l
+
+# 프로시저명으로 호출 지점 찾기
+grep -r "{프로시저명}" --include="*-mapping-query.xml" src/com/hr/ -l
+grep -r "{프로시저명}" --include="*.java" src/com/hr/ -l
+
+# JSP에서 화면 찾기 (한국어 제목)
+grep -r "{화면 제목}" --include="*.jsp" WebContent/WEB-INF/jsp/ -l
+```
+
+### Step 3: 전체 체인 조립
+
+화면 하나의 파일 세트:
+```
+Controller: src/com/hr/{module}/{sub}/{screen}/{Screen}Controller.java
+Service:    src/com/hr/{module}/{sub}/{screen}/{Screen}Service.java
+Mapper:     src/com/hr/{module}/{sub}/{screen}/{Screen}-mapping-query.xml
+JSP:        WebContent/WEB-INF/jsp/{module}/{sub}/{screen}/{screen}.jsp
+```
+
+URL → Controller 라우팅:
+```
+/Xxx.do?cmd=getXxxList  →  @RequestMapping("/Xxx.do") + @RequestMapping(params="cmd=getXxxList")
+/GetDataList.do?cmd=yyy →  GetDataListController → dao.getList("yyy", paramMap)
+/SaveData.do?cmd=zzz    →  SaveDataController → dao.update("zzz") + dao.delete("deleteZzz")
+/ExecPrc.do?cmd=prcAbc  →  ExecPrcController → proDao.excute("prcAbc", paramMap)
+```
+
+---
+
+## 에러 진단 프레임워크
+
+에러 발생 시 원인을 3가지 차원으로 분류하여 접근한다.
+
+### 차원 1: 사용자 데이터 오류
+```
+증상: 화면에서 "저장에 실패하였습니다." 또는 빈 목록
+원인: 잘못된 입력값, 날짜 범위 미스매치, 필수값 누락
+
+진단 순서:
+1. Controller의 catch 블록에서 Exception 메시지 확인
+2. Mapper XML의 WHERE 조건 확인 (:ssnEnterCd 바인딩 올바른지)
+3. paramMap에 필요한 세션 변수가 모두 주입되는지 확인
+4. IBSheet SaveName과 매퍼 $rm.xxx의 camelCase 매칭 확인
+```
+
+### 차원 2: 시스템/코드 오류
+```
+증상: 500 에러, NullPointerException, Anyframe 쿼리 바인딩 오류
+원인: 코드 버그, 매퍼 오류, @Autowired 설정 누락
+
+진단 순서:
+1. 서버 로그에서 스택 트레이스 확인
+2. Anyframe 쿼리 ID가 올바른지 (cmd 값 = 매퍼 select/update id)
+3. :bind 파라미터가 paramMap에 모두 들어있는지
+4. $rm.field vs :param 혼용 여부 ($rm은 컬렉션 내 항목, :는 직접 바인딩)
+5. CALLABLE인 경우 OUT 파라미터 jdbcType 확인
+6. @Autowired("BeanName") 빈 이름 오타 확인
+```
+
+### 차원 3: DB/프로시저 오류
+```
+증상: sqlCode/sqlErrm에 오라클 에러 코드 반환
+원인: 프로시저 내부 에러, 데이터 무결성 위반, 권한 부족
+
+진단 순서:
+1. sqlErrm 메시지 확인 (ORA-XXXXX 코드)
+2. 프로시저 호출 매퍼에서 IN 파라미터 확인
+3. 프로시저가 사용하는 테이블의 컬럼/제약조건 확인
+4. 동적 SQL 관련이면 F_COM_GET_SQL_AUTH 반환값 확인
+5. → 깊은 분석 필요 시 procedure-tracer 에이전트 위임
+```
+
+---
+
+## 공통 컴포넌트 맵
+
+{{COMPONENT_REFS}}

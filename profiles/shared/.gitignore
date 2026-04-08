@@ -1,0 +1,16 @@
+# 런타임 산출물 (하네스 실행 결과물)
+_workspace/
+
+# OS / 에디터
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.idea/
+.vscode/
+
+# Claude Code 로컬 상태
+.claude/local/
+.claude/.cache/
+.claude/logs/

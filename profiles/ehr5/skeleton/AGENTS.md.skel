@@ -1,0 +1,95 @@
+# {{SYSTEM_NAME}} — Project Instructions
+
+Oracle 프로시저 중심의 레거시 인사시스템. DB에 비즈니스 로직이 강하게 존재한다.
+
+## 기술 스택
+
+| 레이어 | 기술 |
+|--------|------|
+| 언어 | Java 8 |
+| 프레임워크 | Spring Boot 2.7.18 |
+| DB 접근 | MyBatis 3 (mybatis-spring-boot-starter 2.3.1) |
+| DB | Oracle (프로시저·트리거·패키지 적극 활용) |
+| 뷰 | JSP + jQuery + IBSheet7 |
+| DI | `@Autowired` 권장. 기존 파일이 `@Inject @Named` 쓰면 해당 파일 패턴 따르기 |
+| 빌드 | Maven (pom.xml) |
+| 핵심 JAR | `isu-core-1.0.jar` (Dao, Interceptor, Log, ParamUtils — 소스 수정 불가) |
+
+## 핵심 패턴: `.do` + `cmd=` 디스패치
+
+이 시스템의 모든 화면은 `.do` URL에 `cmd` 파라미터로 메서드를 라우팅한다.
+
+**법칙 A — 전용 Controller**
+```
+JSP → /VacationApr.do?cmd=getVacationAprList → VacationAprController → VacationAprService → dao.getList("getVacationAprList", paramMap)
+```
+
+**법칙 B — 공통 Controller (GetDataList.do / SaveData.do)**
+```
+JSP → /GetDataList.do?cmd=getXxxList → GetDataListController → dao.getList("getXxxList", paramMap)
+JSP → /SaveData.do?cmd=saveXxx → SaveDataController → dao.update("saveXxx")/dao.delete("deleteXxx")
+```
+`cmd`가 곧 MyBatis 쿼리 ID가 된다.
+
+**법칙 C — 하이브리드 (전용 Controller + AuthTableService)**
+```
+JSP → /SepDcPayMgr.do?cmd=getList → SepDcPayMgrController (@Inject AuthTableService) → authTableService.getAuthQueryMap() → ${query} 주입 → dao.getList(...)
+```
+전용 Controller이면서 AuthTableService를 주입받아 `${query}` 권한을 생성하는 패턴. {{LAW_C_COUNT}}개 컨트롤러가 사용.
+
+**법칙 D — 프로시저 호출 (ExecPrc.do)**
+```
+JSP → /ExecPrc.do?cmd=prcXxx → ExecPrcController → ProDao.excute("prcXxx", paramMap) → CALL P_XXX(OUT, OUT, IN...)
+```
+
+## 파일 구조
+
+```
+src/main/java/com/hr/{module}/...        ← Controller, Service
+src/main/resources/mapper/com/hr/{module}/...  ← *-sql-query.xml (MyBatis 매퍼)
+src/main/webapp/WEB-INF/jsp/{module}/...  ← JSP
+```
+
+## 모듈 맵
+
+{{MODULE_MAP}}
+
+## 필수 기술 규칙
+
+- **매퍼 파일명**: `*-sql-query.xml` (NOT `-mapping-query.xml`)
+- **MyBatis 바인딩**: `#{param}` (안전), `${query}` (권한 동적 SQL만)
+- **결과 타입**: `resultType="cMap"` (MapDto — Oracle UPPER_SNAKE → camelCase 자동 변환)
+- **세션 변수**: {{SESSION_VARS}}
+- **권한 주입**: `AuthTableService.getAuthQueryMap()` → `${query}` INNER JOIN
+- **DAO 메서드**: `getList`, `getMap`, `getOne`, `create`, `update`, `delete`, `excute` (오타 유지)
+- **에러 메시지**: 한국어 ("저장 되었습니다.", "조회에 실패 하였습니다.")
+- **MERGE 패턴**: `<foreach item="rm" collection="mergeRows" separator=" UNION ALL ">` + `FROM DUAL`
+- **DELETE 패턴**: `(NULL, NULL)` 센티넬 + `<foreach item="rm" collection="deleteRows">`
+- **프로시저 OUT**: `#{sqlCode,mode=OUT,jdbcType=VARCHAR}`, `#{sqlErrm,mode=OUT,jdbcType=VARCHAR}`
+
+## DB 접근 규칙
+
+- DB 직접 접속 시 **SELECT(조회)만 허용**
+- 프로시저, 함수, 트리거: **사용자가 직접 생성/수정**
+- 더미 데이터, 테스트 데이터: **사용자가 직접 INSERT**
+- AI는 SQL 스크립트를 파일로 작성하여 제공 가능 (직접 실행 금지)
+
+## 치명 프로시저 (변경 시 사용자 승인 필수)
+
+{{CRITICAL_PROC}}
+
+AI는 위 프로시저를 직접 수정하지 않는다.
+
+## 금지 사항
+
+- Anyframe 전용 어노테이션 (프로젝트는 Spring Boot 네이티브)
+- JPA, Hibernate (MyBatis 고정)
+- React/Vue (레거시 화면은 JSP + jQuery + IBSheet7 고정)
+- 영어 에러 메시지 (사용자 언어는 한국어)
+- 회사 코드 하드코딩 (반드시 `#{ssnEnterCd}` 바인드)
+- 그린필드 구현 (반드시 기존 화면을 복제 베이스로)
+
+## 참고: DB_Object 없음
+
+프로시저/함수/트리거 소스 파일이 이 레포에 없다. Oracle에만 존재한다.
+코드에서 프로시저를 분석하려면 매퍼 XML의 CALL문과 Java 서비스의 `dao.excute()` 호출을 역추적한다.

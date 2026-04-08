@@ -1,0 +1,166 @@
+---
+name: codebase-navigator
+description: "EHR5 코드베이스 탐색 및 에러 진단 스킬. '어디에 있어', '찾아줘', '메뉴 찾기', '에러 원인', '로직 어디', '화면 찾기', '테이블 찾기', '쿼리 찾기' 등의 키워드에 트리거. 자연어 질문에서 코드 경로를 찾을 때 반드시 이 스킬을 사용한다."
+---
+
+# Codebase Navigator — EHR5 코드 탐색 스킬
+
+## 모듈 맵
+
+{{MODULE_MAP}}
+
+---
+
+## 자연어 → 코드 경로 찾기
+
+### Step 1: 키워드에서 모듈 특정
+
+```
+"연차 신청" → tim/ (레거시) 또는 wtm/ (신규) — 둘 다 확인
+"급여 계산" → cpn/payCalculate/
+"인사 발령" → hrm/post/
+"결재 승인" → hri/applyApproval/
+"경조금 신청" → ben/occasion/
+"권한 설정" → sys/security/
+"조직도" → org/
+```
+
+### Step 2: 파일 찾기 명령어
+
+```bash
+# 컨트롤러 찾기 (키워드 기반)
+grep -r "class.*{키워드}.*Controller" --include="*.java" src/main/java/com/hr/ -l
+
+# URL 매핑으로 찾기
+grep -r "@RequestMapping.*{URL}" --include="*.java" src/main/java/com/hr/ -l
+
+# 매퍼 쿼리 ID로 찾기
+grep -r "id=\"{쿼리ID}\"" --include="*-sql-query.xml" src/main/resources/mapper/ -l
+
+# 테이블명으로 관련 매퍼 찾기
+grep -r "{테이블명}" --include="*-sql-query.xml" src/main/resources/mapper/ -l
+
+# 프로시저명으로 호출 지점 찾기
+grep -r "{프로시저명}" --include="*-sql-query.xml" src/main/resources/mapper/ -l
+grep -r "{프로시저명}" --include="*.java" src/main/java/com/hr/ -l
+
+# JSP에서 화면 찾기 (한국어 제목)
+grep -r "{화면 제목}" --include="*.jsp" src/main/webapp/WEB-INF/jsp/ -l
+```
+
+### Step 3: 전체 체인 조립
+
+화면 하나의 파일 세트:
+```
+Controller: src/main/java/com/hr/{module}/{sub}/{screen}/{Screen}Controller.java
+Service:    src/main/java/com/hr/{module}/{sub}/{screen}/{Screen}Service.java
+Mapper:     src/main/resources/mapper/com/hr/{module}/{sub}/{screen}/{Screen}-sql-query.xml
+JSP:        src/main/webapp/WEB-INF/jsp/{module}/{sub}/{screen}/{screen}.jsp
+```
+
+URL → Controller 라우팅:
+```
+/Xxx.do?cmd=getXxxList  →  @RequestMapping("/Xxx.do") + @RequestMapping(params="cmd=getXxxList")
+/GetDataList.do?cmd=yyy →  GetDataListController → dao.getList("yyy", paramMap)
+/SaveData.do?cmd=zzz    →  SaveDataController → dao.update("zzz") + dao.delete("deleteZzz")
+/ExecPrc.do?cmd=prcAbc  →  ExecPrcController → proDao.excute("prcAbc", paramMap)
+```
+
+---
+
+## 에러 진단 프레임워크
+
+에러 발생 시 원인을 3가지 차원으로 분류하여 접근한다.
+
+### 차원 1: 사용자 데이터 오류
+```
+증상: 화면에서 "저장에 실패하였습니다" 또는 빈 목록
+원인: 잘못된 입력값, 날짜 범위 미스매치, 필수값 누락
+
+진단 순서:
+1. Controller의 catch 블록에서 Exception 메시지 확인
+2. Mapper XML의 WHERE 조건 확인 (#{ssnEnterCd} 올바른지)
+3. paramMap에 필요한 세션 변수가 모두 주입되는지 확인
+4. IBSheet SaveName과 매퍼 #{rm.xxx}의 camelCase 매칭 확인
+```
+
+### 차원 2: 시스템/코드 오류
+```
+증상: 500 에러, NullPointerException, MyBatis 바인딩 오류
+원인: 코드 버그, 매퍼 오류, 타입 불일치
+
+진단 순서:
+1. 서버 로그에서 스택 트레이스 확인
+2. MyBatis 쿼리 ID가 올바른지 (cmd 값 = 매퍼 select/update id)
+3. parameterType="map" / resultType="cMap" 확인
+4. #{param} vs ${param} 혼용 여부 (${는 권한 query만)
+5. CALLABLE인 경우 OUT 파라미터 jdbcType 확인
+```
+
+### 차원 3: DB/프로시저 오류
+```
+증상: sqlCode/sqlErrm에 오라클 에러 코드 반환
+원인: 프로시저 내부 에러, 데이터 무결성 위반, 권한 부족
+
+진단 순서:
+1. sqlErrm 메시지 확인 (ORA-XXXXX 코드)
+2. 프로시저 호출 매퍼에서 IN 파라미터 확인
+3. 프로시저가 사용하는 테이블의 컬럼/제약조건 확인
+4. 동적 SQL 관련이면 F_COM_GET_SQL_AUTH 반환값 확인
+5. → 깊은 분석 필요 시 procedure-tracer 에이전트 위임
+```
+
+---
+
+## 공통 컴포넌트 맵
+
+### 공통 Controller (직접 수정 금지)
+| Controller | URL | 역할 |
+|-----------|-----|------|
+| GetDataListController | /GetDataList.do | 범용 조회 (법칙 B) |
+| SaveDataController | /SaveData.do | 범용 저장 (법칙 B) |
+| ExecPrcController | /ExecPrc.do | 범용 프로시저 호출 (법칙 D) |
+| ComController | (베이스 클래스) | getDataList/saveData/execPrc 메서드 제공 |
+
+### 핵심 서비스
+| 서비스 | 역할 |
+|--------|------|
+| AuthTableService | 권한 쿼리 생성 (F_COM_GET_SQL_AUTH) |
+| CommonCodeService | 공통 코드 조회 |
+| Language / LanguageUtil | i18n 메시지 |
+| SecurityMgrService | 보안/암호화 |
+
+### DAO 3종
+| DAO | Bean명 | 용도 |
+|-----|--------|------|
+| Dao | `@Named("Dao")` | 기본 CRUD (대부분의 서비스) |
+| ProDao | `@Named("ProDao")` | 프로시저 전용 (ExecPrcService) |
+| RecDao | `@Named("RecDao")` | 채용 모듈 전용 |
+
+### 핵심 Oracle 함수 (매퍼에서 직접 호출)
+```
+F_COM_GET_SQL_AUTH()       — 권한 동적 WHERE 생성
+F_COM_GET_LANGUAGE_MAPPING — 다국어 컬럼 매핑 ({{COMPONENT_REFS}})
+F_COM_GET_NAMES()          — 사번 → 이름 변환
+F_COM_GET_ORG_NM()         — 조직코드 → 조직명
+F_COM_GET_GRCODE_NAME()    — 그룹코드 → 코드명
+F_COM_DECRYPT()            — 암호화 컬럼 복호화
+```
+
+### 세션 변수 참조
+| 변수 | 의미 | 값 예시 |
+|------|------|---------|
+| ssnEnterCd | 회사 코드 | "100" |
+| ssnSabun | 사번 | "20240001" |
+| ssnSearchType | 검색 범위 | A(전체), P(본인), O(조직) |
+| ssnGrpCd | 권한 그룹 | "99"(ESS), "11"(CEO), 기타 |
+| ssnAdminYn | 관리자 여부 | Y/N |
+| ssnLocaleCd | 로케일 | "ko_KR" |
+| ssnOrgCd | 소속 조직 | "ORG001" |
+
+### 테이블 접두사 규칙
+```
+THRM = 인사 마스터    TCPN = 급여/보상    TTIM = 근태
+TSYS = 시스템        TORG = 조직        THRI = 신청/결재
+TBEN = 복리후생      TPAP = 평가        TTRA = 교육
+```

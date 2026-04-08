@@ -1,0 +1,221 @@
+---
+name: procedure-tracer
+description: "EHR5 프로시저 체인 분석 및 동적 SQL 추적 스킬. '프로시저 분석', '급여 로직', '체인 추적', '비즈니스 로직 파악', '동적 SQL', '프로시저 연관', 'DB 로직' 등의 키워드에 트리거. 프로시저가 어떻게 호출되고 어디까지 영향을 미치는지 분석할 때 반드시 이 스킬을 사용한다."
+---
+
+# Procedure Tracer — EHR5 프로시저 체인 추적 스킬
+
+## 전제
+
+- 프로시저/함수/트리거 **소스 파일이 이 레포에 없다** (Oracle에만 존재)
+- 매퍼 XML의 CALL문과 Java 서비스의 dao.excute() 호출로 **간접 추적**한다
+- 프로시저 내부 로직은 Oracle에서 직접 확인해야 한다
+
+---
+
+## 7-Layer 깊이 지도
+
+```
+L1  JSP           $.ajax({ url: "Xxx.do", data: { cmd: "xxx" } })
+L2  Controller    @RequestMapping → session 주입 → auth 주입 → service 호출
+L3  Service       비즈니스 조합 → dao.getList/update/delete/excute 체이닝
+L4  DAO           Dao.excute(queryId, paramMap) → SqlSessionTemplate
+L5  Mapper XML    statementType="CALLABLE" → CALL P_XXX(OUT, OUT, IN...)
+L6  Procedure     서브 프로시저 팬아웃 (P_CPN_CAL_PAY_MAIN → 8개 직접 서브)
+L7  Trigger       INSERT/UPDATE 시 자동 발동 (CPN 7개, HRI 1개, TIM 1개)
+```
+
+---
+
+## 순방향 추적 (화면 → DB)
+
+입력: 화면명, URL, 또는 기능 설명
+
+### Step 1: Controller 찾기
+```bash
+# 화면명으로
+grep -rn "class.*{화면명}.*Controller" --include="*.java" src/main/java/com/hr/
+
+# URL로
+grep -rn "@RequestMapping.*value.*{URL}" --include="*.java" src/main/java/com/hr/
+```
+
+### Step 2: Service 메서드 추적
+```bash
+# Controller에서 주입하는 Service 확인
+grep -n "@Named\|@Inject\|private.*Service" {Controller파일}
+
+# Service 파일 열어서 dao 호출 목록 추출
+grep -n "dao\.\(getList\|getMap\|update\|delete\|excute\|create\)" {Service파일}
+```
+
+### Step 3: Mapper 쿼리 확인
+```bash
+# Service에서 사용하는 쿼리 ID로 매퍼 찾기
+grep -rn "id=\"{쿼리ID}\"" --include="*-sql-query.xml" src/main/resources/mapper/
+```
+
+### Step 4: 프로시저 확인
+```bash
+# CALLABLE 쿼리 찾기 (프로시저 호출)
+grep -rn "statementType.*CALLABLE" --include="*-sql-query.xml" src/main/resources/mapper/com/hr/{module}/
+
+# 특정 프로시저의 매퍼 호출 지점
+grep -rn "CALL.*{프로시저명}" --include="*-sql-query.xml" src/main/resources/mapper/
+```
+
+---
+
+## 역방향 추적 (프로시저 → 화면)
+
+입력: 프로시저명 (예: P_CPN_CAL_PAY_MAIN)
+
+### Step 1: 매퍼에서 CALL 찾기
+```bash
+grep -rn "{프로시저명}" --include="*-sql-query.xml" src/main/resources/mapper/
+```
+→ 쿼리 ID 추출 (예: `PayCalcCreProcP_CPN_CAL_PAY_MAIN`)
+
+### Step 2: Java에서 쿼리 ID 호출 찾기
+```bash
+grep -rn "{쿼리ID}" --include="*.java" src/main/java/com/hr/
+```
+→ Service 클래스, 메서드명 추출
+
+### Step 3: Controller에서 Service 찾기
+```bash
+grep -rn "{ServiceName}" --include="*Controller.java" src/main/java/com/hr/
+```
+→ URL 매핑, cmd 값 추출
+
+### Step 4: JSP에서 URL 찾기
+```bash
+grep -rn "{URL패턴}" --include="*.jsp" src/main/webapp/WEB-INF/jsp/
+```
+→ 최종 화면 확인
+
+---
+
+## 연관 프로시저 확장 탐색
+
+프로시저 하나를 분석할 때, 이름 패턴으로 관련 프로시저도 함께 찾는다.
+
+```bash
+# 같은 접두사의 프로시저군 탐색
+grep -rn "P_CPN_CAL" --include="*-sql-query.xml" src/main/resources/mapper/
+grep -rn "PKG_CPN" --include="*-sql-query.xml" src/main/resources/mapper/
+
+# 트리거 연관 탐색 (테이블명 기반)
+grep -rn "trg_cpn\|trg_hri\|trg_tim" --include="*-sql-query.xml" src/main/resources/mapper/
+
+# P_HRI_AFTER_PROC_EXEC 연관 (신청 후처리)
+grep -rn "afterApprovalMgrResultProcCall\|P_HRI_AFTER_PROC_EXEC" --include="*.java" src/main/java/com/hr/
+```
+
+---
+
+## 동적 SQL 3가지 패턴
+
+### 패턴 1: ${query} — 권한 동적 WHERE
+
+**발생 빈도**: 37개 매퍼, 43건
+**메커니즘**: Oracle `F_COM_GET_SQL_AUTH()` → SQL 서브쿼리 문자열 → `${query}`로 매퍼에 주입
+
+```
+추적 명령:
+grep -rn "\${query}" --include="*-sql-query.xml" src/main/resources/mapper/
+grep -rn "getAuthQueryMap\|authTableService" --include="*.java" src/main/java/com/hr/
+```
+
+주입 흐름:
+```
+Controller: paramMap.put("authSqlID", "THRM151")
+          → authTableService.getAuthQueryMap(paramMap)
+          → paramMap.put("query", result.get("query"))
+Mapper:   <if test='ssnSearchType eq "O"'>
+              INNER JOIN ${query} AUTH ON AUTH.ENTER_CD = A.ENTER_CD
+          </if>
+```
+
+ssnSearchType별 동작:
+- `"A"` (전체): ${query} 미사용, 제한 없음
+- `"P"` (본인): Java에서 sabun 강제 치환 (ssnGrpCd="99")
+- `"O"` (조직): ${query} INNER JOIN으로 조직 범위 필터링
+
+### 패턴 2: EXECUTE IMMEDIATE — 프로시저 내부 동적 SQL
+
+**레포에서 확인 불가** — 프로시저 소스가 Oracle에만 있음.
+
+발견 시 안내:
+```
+"이 프로시저 내부에서 동적 SQL을 생성하여 실행할 수 있습니다.
+Oracle에서 다음 쿼리로 확인하세요:
+SELECT TEXT FROM USER_SOURCE WHERE NAME = '{프로시저명}' AND TYPE = 'PROCEDURE' ORDER BY LINE;"
+```
+
+동적 SQL 사용이 의심되는 프로시저:
+- 데이터 복사/마이그레이션 계열 (p_sys_sabun_data_copy 등)
+- 연말정산 패키지 (PKG_CPN_YEA_*)
+- 급여 계산 체인 (P_CPN_CAL_PAY_MAIN 하위)
+
+### 패턴 3: F_COM_GET_SQL_MAP — 설정 기반 동적 쿼리
+
+```bash
+grep -rn "F_COM_GET_SQL_MAP" --include="*-sql-query.xml" src/main/resources/mapper/
+```
+설정 테이블의 값을 기반으로 동적 SQL을 생성하는 Oracle 함수. 권한 ${query}와 유사한 메커니즘.
+
+---
+
+## 치명 프로시저 레지스트리
+
+{{CRITICAL_PROC}}
+
+---
+
+## 프로시저 목록
+
+{{PROC_LIST}}
+
+---
+
+## 트리거 목록
+
+{{TRIGGER_LIST}}
+
+---
+
+## 분석 보고서 템플릿
+
+```markdown
+## 프로시저 체인 분석: {대상명}
+
+### 호출 체인
+L1 JSP: {파일} → {URL}?cmd={cmd}
+L2 Controller: {클래스}.{메서드}()
+L3 Service: {클래스}.{메서드}() → dao.excute("{쿼리ID}")
+L4 DAO: {Dao종류}.excute()
+L5 Mapper: {파일} → CALL {프로시저명}(...)
+L6 Procedure: {프로시저명} → [Oracle에서 확인 필요]
+
+### 관련 파일
+| 파일 | 경로 |
+|------|------|
+| Controller | {경로} |
+| Service | {경로} |
+| Mapper | {경로} |
+| JSP | {경로} |
+
+### 동적 SQL
+- ${query} 사용: {Y/N} (F_COM_GET_SQL_AUTH)
+- 프로시저 내부 동적 SQL: {확인 불가 / 의심됨}
+
+### 위험 요소
+- 치명 프로시저 접촉: {Y/N}
+- 트리거 연관: {목록}
+- P_HRI_AFTER_PROC_EXEC 연관: {Y/N} (applCd: {값})
+
+### Oracle에서 직접 확인 필요 사항
+- {프로시저 내부 로직}
+- {동적 SQL 상세}
+```

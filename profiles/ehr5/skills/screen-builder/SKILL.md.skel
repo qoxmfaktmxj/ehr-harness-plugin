@@ -1,0 +1,416 @@
+---
+name: screen-builder
+description: "EHR5 화면 생성/수정 전문 스킬. 신규 화면 개발, 기존 화면 수정, CRUD 화면 추가 요청 시 반드시 이 스킬을 사용한다. '화면 만들어', '신규 개발', 'CRUD', '조회 화면', '관리 화면', '신청 화면' 등의 키워드에 트리거."
+---
+
+# Screen Builder — EHR5 화면 생성 스킬
+
+## 원칙
+
+1. **그린필드 금지** — 반드시 기존 유사 화면을 찾아 복제 베이스로 사용한다.
+2. **법칙 판별 우선** — 화면 유형(A/B/C/D)을 먼저 결정하고 해당 템플릿을 따른다. 법칙 C(하이브리드)는 `domain-knowledge` 스킬 §2 참조.
+3. **패턴 충실도** — 이 프로젝트의 기존 코드와 동일한 스타일로 작성한다.
+
+---
+
+## Step 1: 유사 화면 탐색
+
+```bash
+# 모듈 추정 후 컨트롤러 목록 확인
+grep -r "class.*Controller" --include="*.java" src/main/java/com/hr/{module}/ -l
+
+# 특정 기능 키워드로 검색
+grep -r "{키워드}" --include="*.java" src/main/java/com/hr/ -l
+grep -r "{키워드}" --include="*-sql-query.xml" src/main/resources/mapper/ -l
+```
+
+법칙 판별:
+- 전용 Controller 클래스 존재 (AuthTableService 미사용) → **법칙 A**
+- JSP가 `/GetDataList.do` `/SaveData.do` 직접 호출 → **법칙 B**
+- 전용 Controller + AuthTableService 주입 (41개 컨트롤러) → **법칙 C** (`domain-knowledge` §2 참조)
+- JSP가 `/ExecPrc.do` 호출 → **법칙 D**
+- WTM 모듈 (프로시저 없음, Java 로직) → **법칙 A 변형**
+
+---
+
+## Step 2: 법칙 A — 전용 Controller 템플릿
+
+### Controller
+```java
+@Controller
+@RequestMapping(value="/NewScreen.do", method=RequestMethod.POST)
+public class NewScreenController {
+
+    @Autowired
+    private NewScreenService newScreenService;
+
+    @Autowired
+    private AuthTableService authTableService;
+
+    // 뷰 매핑
+    @RequestMapping(params="cmd=viewNewScreen", method={RequestMethod.POST, RequestMethod.GET})
+    public String viewNewScreen() throws Exception {
+        return "module/subdomain/newScreen/newScreen";
+    }
+
+    // 목록 조회
+    @RequestMapping(params="cmd=getNewScreenList", method=RequestMethod.POST)
+    public ModelAndView getNewScreenList(
+            HttpSession session, HttpServletRequest request,
+            @RequestParam Map<String, Object> paramMap) throws Exception {
+
+        paramMap.put("ssnEnterCd", session.getAttribute("ssnEnterCd"));
+        paramMap.put("ssnSabun", session.getAttribute("ssnSabun"));
+        paramMap.put("ssnSearchType", session.getAttribute("ssnSearchType"));
+        paramMap.put("ssnGrpCd", session.getAttribute("ssnGrpCd"));
+
+        // 권한 쿼리 주입 (필요 시)
+        Map<?, ?> query = authTableService.getAuthQueryMap(paramMap);
+        if (query != null) {
+            paramMap.put("query", query.get("query"));
+        }
+
+        List<?> list = new ArrayList<Object>();
+        String Message = "";
+        try {
+            list = newScreenService.getNewScreenList(paramMap);
+        } catch (Exception e) {
+            Message = "조회에 실패 하였습니다.";
+        }
+
+        ModelAndView mv = new ModelAndView();
+        mv.setViewName("jsonView");
+        mv.addObject("DATA", list);
+        mv.addObject("Message", Message);
+        return mv;
+    }
+
+    // 저장
+    @RequestMapping(params="cmd=saveNewScreen", method=RequestMethod.POST)
+    public ModelAndView saveNewScreen(
+            HttpSession session, HttpServletRequest request,
+            @RequestParam Map<String, Object> paramMap) throws Exception {
+
+        Map<String, Object> convertMap = ParamUtils.requestInParamsMultiDML(
+                request, paramMap.get("s_SAVENAME").toString(), "");
+        convertMap.put("ssnSabun", session.getAttribute("ssnSabun"));
+        convertMap.put("ssnEnterCd", session.getAttribute("ssnEnterCd"));
+
+        String message = "";
+        int resultCnt = -1;
+        try {
+            resultCnt = newScreenService.saveNewScreen(convertMap);
+            message = resultCnt > 0 ? "저장 되었습니다." : "저장된 내용이 없습니다.";
+        } catch (Exception e) {
+            resultCnt = -1;
+            message = "저장에 실패하였습니다.";
+        }
+
+        Map<String, Object> resultMap = new HashMap<String, Object>();
+        resultMap.put("Code", resultCnt);
+        resultMap.put("Message", message);
+        ModelAndView mv = new ModelAndView();
+        mv.setViewName("jsonView");
+        mv.addObject("Result", resultMap);
+        return mv;
+    }
+}
+```
+
+### Service
+```java
+@Service("NewScreenService")
+public class NewScreenService {
+
+    @Autowired
+    private Dao dao;
+
+    public List<?> getNewScreenList(Map<?, ?> paramMap) throws Exception {
+        return (List<?>) dao.getList("getNewScreenList", paramMap);
+    }
+
+    public int saveNewScreen(Map<?, ?> convertMap) throws Exception {
+        int cnt = 0;
+        if (((List<?>) convertMap.get("deleteRows")).size() > 0) {
+            cnt += dao.delete("deleteNewScreen", convertMap);
+        }
+        if (((List<?>) convertMap.get("mergeRows")).size() > 0) {
+            cnt += dao.update("saveNewScreen", convertMap);
+        }
+        return cnt;
+    }
+}
+```
+
+### Mapper XML
+파일명: `NewScreen-sql-query.xml`
+위치: `src/main/resources/mapper/com/hr/{module}/{subdomain}/newScreen/`
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="module.subdomain.newScreen">
+
+    <!-- 목록 조회 -->
+    <select id="getNewScreenList" parameterType="map" resultType="cMap">
+        <![CDATA[
+        SELECT A.COL1, A.COL2, A.COL3
+          FROM TXXX A
+         WHERE A.ENTER_CD = #{ssnEnterCd}
+        ]]>
+        <if test="searchKey != null and searchKey neq ''">
+            AND A.COL1 LIKE '%' || TRIM(#{searchKey}) || '%'
+        </if>
+        <if test='ssnSearchType eq "O"'>
+            INNER JOIN ${query} AUTH
+               ON AUTH.ENTER_CD = A.ENTER_CD AND AUTH.SABUN = A.SABUN
+        </if>
+        ORDER BY A.COL1
+    </select>
+
+    <!-- 저장 (MERGE) -->
+    <update id="saveNewScreen" parameterType="map">
+        MERGE INTO TXXX T
+        USING (
+            SELECT NULL AS ENTER_CD, NULL AS COL1 FROM DUAL
+            <foreach item="rm" collection="mergeRows" separator="">
+            UNION ALL
+            SELECT TRIM(#{ssnEnterCd}) AS ENTER_CD
+                 , TRIM(#{rm.col1}) AS COL1
+              FROM DUAL
+            </foreach>
+        ) S
+        ON (T.ENTER_CD = S.ENTER_CD AND T.COL1 = S.COL1)
+        WHEN MATCHED THEN
+            UPDATE SET T.COL2 = S.COL2
+                     , T.CHKDATE = SYSDATE
+                     , T.CHKID = #{ssnSabun}
+        WHEN NOT MATCHED THEN
+            INSERT (ENTER_CD, COL1, COL2, CHKDATE, CHKID)
+            VALUES (S.ENTER_CD, S.COL1, S.COL2, SYSDATE, #{ssnSabun})
+    </update>
+
+    <!-- 삭제 -->
+    <delete id="deleteNewScreen" parameterType="map">
+        DELETE FROM TXXX
+         WHERE (ENTER_CD, COL1) IN ( (NULL, NULL)
+        <foreach item="rm" collection="deleteRows">
+            <if test="rm.col1 != null and rm.col1 neq ''">
+                , (TRIM(#{ssnEnterCd}), TRIM(#{rm.col1}))
+            </if>
+        </foreach>
+        )
+    </delete>
+
+</mapper>
+```
+
+### JSP 골격
+위치: `src/main/webapp/WEB-INF/jsp/{module}/{subdomain}/newScreen/newScreen.jsp`
+
+```jsp
+<%@ include file="/WEB-INF/jsp/common/include/taglibs.jsp"%>
+<html>
+<head>
+    <%@ include file="/WEB-INF/jsp/common/include/meta.jsp"%>
+    <%@ include file="/WEB-INF/jsp/common/include/jqueryScript.jsp"%>
+    <%@ include file="/WEB-INF/jsp/common/include/ibSheetScript.jsp"%>
+</head>
+<body>
+<form id="form" name="form">
+    <!-- 검색 조건 -->
+    <input type="hidden" id="cmd" name="cmd" value="">
+    <!-- 검색 필드들 -->
+</form>
+
+<script type="text/javascript">
+var mySheet;
+var initdata = {};
+initdata.Cfg = {SearchMode:smLazyLoad, Page:22, MergeSheet:msHeaderOnly};
+initdata.HeaderMode = {Sort:1, ColMove:1, ColResize:1, HeaderCheck:1};
+initdata.Cols = [
+    {Header:"No",   Type:"${sNoTy}",  Hidden:Number("${sNoHdn}"),  Width:"${sNoWdt}",  SaveName:"sNo"},
+    {Header:"삭제", Type:"${sDelTy}", Hidden:Number("${sDelHdn}"), Width:"${sDelWdt}", SaveName:"sDelete"},
+    {Header:"상태", Type:"${sSttTy}", Hidden:Number("${sSttHdn}"), Width:"${sSttWdt}", SaveName:"sStatus"},
+    // === 도메인 컬럼 ===
+    {Header:"컬럼1", Type:"Text", Width:120, SaveName:"col1", KeyField:1, Edit:0},
+    {Header:"컬럼2", Type:"Text", Width:200, SaveName:"col2", Edit:1}
+];
+
+$(function() {
+    IBS_InitSheet(mySheet, initdata);
+    mySheet.SetEditable("${editable}");
+    doAction("Search");
+});
+
+function doAction(sAction) {
+    switch(sAction) {
+        case "Search":
+            mySheet.DoSearch("${ctx}/NewScreen.do?cmd=getNewScreenList", $("#form").serialize());
+            break;
+        case "Save":
+            if (!mySheet.HasChangedData()) { alert("변경된 데이터가 없습니다."); return; }
+            mySheet.DoSave("${ctx}/NewScreen.do?cmd=saveNewScreen", $("#form").serialize());
+            break;
+        case "AddRow":
+            mySheet.DataInsert(-1);
+            break;
+    }
+}
+
+function mySheet_OnSearchEnd(Code, Msg, StCode, StMsg) {
+    if (Msg != "") { alert(Msg); }
+}
+function mySheet_OnSaveEnd(Code, Msg, StCode, StMsg) {
+    if (Msg != "") { alert(Msg); }
+    doAction("Search");
+}
+</script>
+</body>
+</html>
+```
+
+---
+
+## Step 3: 법칙 B — 공통 Controller 패턴
+
+법칙 B는 전용 Controller/Service를 만들지 않는다. JSP와 Mapper XML만 만든다.
+
+### JSP (법칙 B 차이점)
+```javascript
+// 조회: GetDataList.do 사용, cmd가 곧 MyBatis 쿼리 ID
+mySheet.DoSearch("${ctx}/GetDataList.do?cmd=getNewScreenList", $("#form").serialize());
+
+// 저장: SaveData.do 사용
+IBS_SaveName(document.mySheetForm, mySheet);  // 필수: SAVENAME 설정
+mySheet.DoSave("${ctx}/SaveData.do?cmd=saveNewScreen", $("#form").serialize());
+```
+
+Mapper XML은 법칙 A와 동일하게 작성한다. `cmd=getNewScreenList`가 곧 `<select id="getNewScreenList">`로 매핑된다.
+
+---
+
+## Step 4: 법칙 D — ExecPrc.do 패턴
+
+### Mapper XML (CALLABLE)
+```xml
+<update id="prcNewScreenProc" parameterType="map" statementType="CALLABLE">
+    <![CDATA[
+    {CALL P_XXX_PROC(
+        #{sqlCode,mode=OUT,jdbcType=VARCHAR},
+        #{sqlErrm,mode=OUT,jdbcType=VARCHAR},
+        #{ssnEnterCd,mode=IN,jdbcType=VARCHAR},
+        #{param1,mode=IN,jdbcType=VARCHAR},
+        #{ssnSabun,mode=IN,jdbcType=VARCHAR}
+    )}
+    ]]>
+</update>
+```
+
+### JSP (법칙 D)
+```javascript
+function doAction(sAction) {
+    switch(sAction) {
+        case "Execute":
+            var data = ajaxCall("${ctx}/ExecPrc.do?cmd=prcNewScreenProc", $("#form").serialize(), false);
+            if (data.Result.Code == null || data.Result.Code == "") {
+                alert("정상적으로 처리되었습니다.");
+            } else {
+                alert("처리중 오류가 발생했습니다.\n" + data.Result.Message);
+            }
+            break;
+    }
+}
+```
+
+---
+
+## Step 5: WTM 모듈 화면 (프로시저 없음)
+
+WTM은 프로시저를 사용하지 않는다. 서비스에 Java 로직이 직접 구현된다.
+
+차이점:
+- Service에 비즈니스 로직이 풍부 (다수 dao 호출 조합, BigDecimal 연산, Stream 처리)
+- `isBatch` 파라미터로 일반/배치 모드 이중 경로
+- `@Async` 비동기 처리 가능
+- 스케줄러 cron 작업 존재
+
+WTM 서비스 패턴:
+```java
+@Service("WtmXxxService")
+public class WtmXxxService {
+    @Autowired
+    private Dao dao;
+
+    public List<?> getList(Map<?, ?> paramMap) throws Exception {
+        return (List<?>) dao.getList("getWtmXxxList", paramMap);
+    }
+
+    public int save(Map<?, ?> convertMap) throws Exception {
+        int cnt = 0;
+        // WTM은 비즈니스 로직이 Java에 있음
+        List<Map<String, Object>> mergeRows = (List<Map<String, Object>>) convertMap.get("mergeRows");
+        for (Map<String, Object> row : mergeRows) {
+            // 유효성 검증, 계산 등을 Java에서 수행
+            cnt += dao.update("saveWtmXxx", row);
+        }
+        return cnt;
+    }
+}
+```
+
+---
+
+## 권한 주입 상세 (${query})
+
+권한이 필요한 화면은 Controller에서 `AuthTableService`를 호출한다.
+
+```java
+// Controller에서:
+paramMap.put("authSqlID", "THRM151");  // 또는 "TORG101"
+Map<?, ?> query = authTableService.getAuthQueryMap(paramMap);
+if (query != null) {
+    paramMap.put("query", query.get("query"));
+}
+```
+
+Mapper XML에서 3가지 주입 패턴:
+```xml
+<!-- 패턴 1: INNER JOIN (가장 흔함) -->
+<if test='ssnSearchType eq "O"'>
+    INNER JOIN ${query} AUTH ON AUTH.ENTER_CD = A.ENTER_CD AND AUTH.SABUN = A.SABUN
+</if>
+
+<!-- 패턴 2: IN 서브쿼리 -->
+<if test='ssnSearchType eq "O"'>
+    AND A.SABUN IN (SELECT SABUN FROM ${query})
+</if>
+
+<!-- 패턴 3: FROM 절 -->
+<if test='ssnSearchType eq "O"'>
+    , ${query} AUTH
+</if>
+```
+
+---
+
+## 실제 코드 예시 (프로젝트 분석 결과)
+
+{{CODE_EXAMPLES}}
+
+---
+
+## 셀프 체크리스트
+
+생성 완료 후 확인:
+- [ ] `@Autowired` 사용 (기존 파일이 `@Inject @Named`이면 해당 파일 패턴 따르기)
+- [ ] WHERE절에 `#{ssnEnterCd}` 필터 존재
+- [ ] 매퍼 파일명: `*-sql-query.xml`
+- [ ] 매퍼 위치: `src/main/resources/mapper/com/hr/{module}/`
+- [ ] `resultType="cMap"`
+- [ ] 에러 메시지 한국어
+- [ ] IBSheet 시스템 컬럼 3개 (sNo, sDelete, sStatus)
+- [ ] MERGE의 첫 행: `SELECT NULL ... FROM DUAL`
+- [ ] DELETE의 첫 행: `(NULL, NULL)` 센티넬
+- [ ] CHKDATE = SYSDATE, CHKID = #{ssnSabun} 감사 컬럼

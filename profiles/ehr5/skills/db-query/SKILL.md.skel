@@ -1,0 +1,195 @@
+---
+name: db-query
+description: "Oracle/Tibero DB SELECT 조회 스킬. 프로시저 소스, 테이블 구조, 데이터 확인 등 DB 직접 조회가 필요할 때 사용한다. 'DB 조회', '프로시저 소스 봐줘', '테이블 구조', 'USER_SOURCE', '컬럼 확인', 'DB에서 확인' 등의 키워드에 트리거."
+---
+
+# DB Query — Oracle/Tibero 조회 전용 스킬
+
+## 제약 조건
+
+- **SELECT만 허용** — INSERT/UPDATE/DELETE/DDL 절대 금지 (`db-read-only` 훅이 차단)
+- DML/DDL이 필요하면 SQL 스크립트를 **파일로 작성**하여 사용자에게 전달
+
+---
+
+## Step 1: 접속 정보 파악
+
+프로젝트의 DB 접속 정보는 아래 파일에 있다. **하드코딩 금지** — 반드시 파일에서 파싱.
+
+### 1순위: `src/main/webapp/META-INF/context.xml`
+
+{{DB_CONNECTION}}
+
+**파싱 규칙:**
+- `url`에서 `log4jdbc:` 제거 → `jdbc:oracle:thin:@{host}:{port}:{SID}`
+- `username`, `password` 그대로 사용
+- Resource가 여러 개면 `name="jdbc/ehr"` 기준
+
+### 2순위: `DataSourceConfiguration.java` 또는 `application.properties`
+
+```properties
+spring.datasource.hr.jndi-name=java:/comp/env/jdbc/ehr
+```
+
+JNDI 이름이 context.xml의 Resource name과 매핑된다.
+
+### 3순위: 사용자에게 직접 물어보기
+
+context.xml이 없거나 접속 불가 시, 사용자에게 host/port/SID/계정을 확인 요청.
+
+---
+
+## Step 2: ojdbc 드라이버 위치 확인
+
+```bash
+# 프로젝트 내 ojdbc jar 검색
+find . -name "ojdbc*.jar" 2>/dev/null
+```
+
+일반적 위치:
+- `target/mvn-lib/ojdbc8-21.5.0.0.jar` (Maven 빌드 후)
+- `src/main/webapp/WEB-INF/lib/ojdbc*.jar` (직접 포함 방식)
+- `~/.m2/repository/com/oracle/database/jdbc/ojdbc8/` (Maven 로컬 저장소)
+
+**Tibero인 경우:**
+- `tibero6-jdbc.jar` 또는 `tibero7-jdbc.jar`
+- 드라이버 클래스: `com.tmax.tibero.jdbc.TbDriver`
+- URL 형식: `jdbc:tibero:thin:@{host}:{port}:{DB명}`
+
+---
+
+## Step 3: 쿼리 실행
+
+`_workspace/` 디렉토리에 Java 파일을 생성하여 실행한다.
+
+### 템플릿: 범용 SELECT 실행기
+
+```java
+import java.sql.*;
+
+public class DbQuery {
+    public static void main(String[] args) throws Exception {
+        // -- 접속 정보 (context.xml에서 파싱) --
+        String url  = "jdbc:oracle:thin:@{HOST}:{PORT}:{SID}";
+        String user = "{USERNAME}";
+        String pass = "{PASS}";
+
+        String sql = args.length > 0 ? args[0]
+            : "SELECT TABLE_NAME FROM USER_TABLES ORDER BY TABLE_NAME";
+
+        DriverManager.setLoginTimeout(10);
+        try (Connection conn = DriverManager.getConnection(url, user, pass);
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+
+            ResultSetMetaData meta = rs.getMetaData();
+            int cols = meta.getColumnCount();
+
+            // 헤더
+            for (int i = 1; i <= cols; i++) {
+                System.out.print(meta.getColumnName(i));
+                if (i < cols) System.out.print("\t");
+            }
+            System.out.println();
+
+            // 데이터
+            int rowCount = 0;
+            while (rs.next()) {
+                for (int i = 1; i <= cols; i++) {
+                    System.out.print(rs.getString(i));
+                    if (i < cols) System.out.print("\t");
+                }
+                System.out.println();
+                if (++rowCount >= 500) {
+                    System.out.println("... (500행 제한)");
+                    break;
+                }
+            }
+            System.out.println("[총 " + rowCount + "행]");
+        }
+    }
+}
+```
+
+### 컴파일 & 실행
+
+```bash
+# Oracle
+javac -cp "target/mvn-lib/ojdbc8-21.5.0.0.jar" _workspace/DbQuery.java
+java -cp "target/mvn-lib/ojdbc8-21.5.0.0.jar;_workspace" DbQuery "SELECT ..."
+
+# Tibero
+javac -cp "{tibero-jdbc.jar 경로}" _workspace/DbQuery.java
+java -cp "{tibero-jdbc.jar 경로};_workspace" DbQuery "SELECT ..."
+```
+
+> Windows: classpath 구분자 `;` / Linux·Mac: `:`
+
+---
+
+## 자주 쓰는 조회 패턴
+
+### 프로시저/패키지 소스 조회
+
+```sql
+SELECT LINE, TEXT FROM USER_SOURCE
+WHERE NAME = '{프로시저명}' AND TYPE IN ('PROCEDURE','PACKAGE BODY')
+ORDER BY LINE
+```
+
+### 테이블 컬럼 구조
+
+```sql
+SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, NULLABLE, DATA_DEFAULT
+FROM USER_TAB_COLUMNS WHERE TABLE_NAME = '{테이블명}'
+ORDER BY COLUMN_ID
+```
+
+### 테이블 코멘트
+
+```sql
+SELECT COLUMN_NAME, COMMENTS
+FROM USER_COL_COMMENTS WHERE TABLE_NAME = '{테이블명}'
+ORDER BY COLUMN_NAME
+```
+
+### 프로시저 내 호출 관계 (서브 프로시저 찾기)
+
+```sql
+SELECT DISTINCT
+  REGEXP_SUBSTR(TEXT, '(P_\w+|PKG_\w+)', 1, 1) AS CALLED_PROC
+FROM USER_SOURCE
+WHERE NAME = '{프로시저명}' AND TYPE IN ('PROCEDURE','PACKAGE BODY')
+  AND REGEXP_LIKE(TEXT, '(P_\w+|PKG_\w+)')
+  AND LINE > 1
+ORDER BY 1
+```
+
+### 특정 테이블을 참조하는 프로시저 목록
+
+```sql
+SELECT DISTINCT NAME, TYPE
+FROM USER_SOURCE
+WHERE UPPER(TEXT) LIKE '%{테이블명}%'
+  AND TYPE IN ('PROCEDURE','PACKAGE BODY','FUNCTION','TRIGGER')
+ORDER BY TYPE, NAME
+```
+
+### 패키지 바디 목록 + 라인 수
+
+```sql
+SELECT NAME, COUNT(*) AS LINES
+FROM USER_SOURCE
+WHERE TYPE = 'PACKAGE BODY' AND NAME LIKE '{패턴}%'
+GROUP BY NAME ORDER BY NAME
+```
+
+---
+
+## 주의사항
+
+1. **500행 제한** — 대량 데이터는 WHERE 조건으로 좁혀서 조회
+2. **접속 타임아웃 10초** — VPN 미연결 시 실패하므로 사용자에게 네트워크 확인 요청
+3. **CLOB 컬럼** — `rs.getString()`으로 읽히지만 매우 긴 경우 잘릴 수 있음
+4. **_workspace/ 파일** — 실행 후 삭제하지 않아도 됨 (gitignore 대상)
+5. **비밀번호** — Java 파일에 적힌 비밀번호는 개발DB 전용. 운영DB 절대 금지

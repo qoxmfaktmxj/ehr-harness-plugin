@@ -1,0 +1,39 @@
+# {{SYSTEM_NAME}} AI 코딩 하네스
+
+Oracle 프로시저 기반 레거시 인사시스템을 위한 AI 코딩 하네스.
+
+## 대상 시스템
+
+| 항목 | 내용 |
+|------|------|
+| 시스템 | {{SYSTEM_NAME}} |
+| 프레임워크 | Spring Boot 2.7.18 |
+| ORM | MyBatis 3 |
+| DB | Oracle |
+| 뷰 | JSP + jQuery + IBSheet7 |
+| 빌드 | Maven |
+
+## 규모
+
+{{MODULE_MAP}}
+
+## 하네스 구성
+
+| 구성 요소 | 수량 |
+|-----------|------|
+| 스킬 | 5개 (screen-builder, codebase-navigator, procedure-tracer, db-query, domain-knowledge) |
+| 에이전트 | 2개 (screen-builder, procedure-tracer) |
+| 훅 | 1개 (db-read-only) |
+| 플랫폼 | Claude Code, Codex CLI, Gemini CLI |
+
+## 사용법
+
+Claude Code에서 자연어로 요청:
+- "휴가 신청 화면 만들어줘" → screen-builder 에이전트
+- "P_CPN_CAL_PAY_MAIN 분석해줘" → procedure-tracer 에이전트
+- "인사 마스터 테이블 구조 알려줘" → db-query 스킬
+
+## 생성 정보
+
+이 하네스는 `ehr-harness-plugin`에 의해 자동 생성되었습니다.
+생성일: {{GENERATED_DATE}}
