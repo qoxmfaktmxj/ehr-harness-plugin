@@ -5,7 +5,7 @@
 ## 1. 프로젝트 개요
 
 Oracle 프로시저 중심의 레거시 인사시스템 ({{SYSTEM_NAME}}).
-Spring Boot 2.7.18 + MyBatis 3 + Java 8 + JSP + jQuery + IBSheet7 + Oracle.
+Spring MVC · Anyframe Query Mapping · Velocity · Java 8 · JSP · jQuery · IBSheet7 · Oracle.
 `.do` + `cmd=` 디스패치 패턴으로 모든 화면이 동작한다 — 상세는 `AGENTS.md` 참조.
 
 ## 2. 스킬 라우팅
@@ -14,15 +14,17 @@ Spring Boot 2.7.18 + MyBatis 3 + Java 8 + JSP + jQuery + IBSheet7 + Oracle.
 |------------|------------------|
 | "화면 만들어", "신규 개발", "CRUD 추가" | `screen-builder` **에이전트** 스폰 |
 | "프로시저 분석해", "급여 로직", "체인 추적", "동적 SQL" | `procedure-tracer` **에이전트** 스폰 |
+| "릴리즈 검증", "배포 안전", "회귀 체크" | `release-reviewer` **에이전트** 스폰 |
 | "어디에 있어?", "찾아줘", "에러 원인", "메뉴 찾기" | `codebase-navigator` **스킬** 직접 사용 |
 | "DB 조회", "프로시저 소스", "테이블 구조", "컬럼 확인" | `db-query` **스킬** 직접 사용 |
-| "권한", "법칙", "패턴", "Family", "APPL_STATUS", "배치" | `domain-knowledge` **스킬** 직접 사용 |
+| "권한", "법칙", "패턴", "디스패처" | `domain-knowledge` **스킬** 직접 사용 |
 | 계획 수립, TDD, 디버깅 등 범용 워크플로우 | **Superpowers** 위임 |
 
 ## 3. 에이전트 사용 규칙
 
 - `screen-builder`: 화면 생성/주요 수정 시 스폰. 기존 화면을 복제 베이스로 자율 실행.
 - `procedure-tracer`: 프로시저 체인 분석 시 스폰. 재귀 추적하여 보고서 반환.
+- `release-reviewer`: 배포 전 회귀 위험 검토 시 스폰.
 - 에이전트는 각자의 스킬(`.claude/skills/`)을 참조하여 작업한다.
 
 ## 4. DB 접근 규칙
@@ -33,28 +35,32 @@ Spring Boot 2.7.18 + MyBatis 3 + Java 8 + JSP + jQuery + IBSheet7 + Oracle.
 
 ## 5. 필수 기술 규칙 (요약)
 
-- DI: `@Autowired` 권장 (기존 파일이 `@Inject @Named` 쓰면 그 패턴 따르기)
-- 매퍼: `*-sql-query.xml`, MyBatis `#{param}`, `resultType="cMap"`
-- 매퍼 위치: `src/main/resources/mapper/com/hr/{module}/`
-- Java 위치: `src/main/java/com/hr/{module}/`
-- JSP 위치: `src/main/webapp/WEB-INF/jsp/{module}/`
-- 응답: `ModelAndView` + `jsonView` (레거시), `@RestController` (API만)
+- DI: `@Autowired` 권장 (기존 파일이 `@Inject @Named` 쓰면 해당 파일 패턴 따르기)
+- 매퍼: `*-mapping-query.xml`, Velocity `:key` / `$var` / `$query`
+- 결과 참조: `$result.variable`
+- DAO 메서드: getList, getMap, getOne, create, update, delete, excute (typo 유지)
 - 에러 메시지: 한국어 ("저장 되었습니다.", "조회에 실패 하였습니다.")
 - 상세 코드 템플릿은 `screen-builder` 스킬 참조.
 
 ## 6. 금지 사항
 
-- Anyframe, JPA, Hibernate
-- React/Vue (레거시 화면), 영어 에러 메시지
-- 회사 코드 하드코딩 (반드시 `#{ssnEnterCd}`)
-- 치명 프로시저 AI 직접 수정 ({{CRITICAL_PROC_NAMES}})
+- MyBatis, JPA, Hibernate
+- React / Vue (레거시 화면), 영어 에러 메시지
+- 회사 코드 하드코딩 (반드시 `:ssnEnterCd`)
 - 그린필드 구현 (기존 화면 복제 기반)
+- 치명 프로시저 AI 직접 수정 ({{CRITICAL_PROC_NAMES}})
 
 ## 7. 우선순위
 
 1. 사용자의 명시적 지시
 2. 이 CLAUDE.md
 3. AGENTS.md
-4. 프로젝트 스킬 (`.claude/skills/`)
+4. 프로젝트 스킬 (`.agents/skills/`)
 5. Superpowers (범용 워크플로우)
 6. Claude 기본 동작
+
+## 8. 변경 이력
+
+| 날짜 | 변경 내용 | 대상 | 사유 |
+|------|----------|------|------|
+| {{GENERATED_DATE}} | 초기 생성 | 전체 | ehr-harness-plugin 자동 생성 |

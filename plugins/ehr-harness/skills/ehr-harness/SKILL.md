@@ -1,6 +1,6 @@
 ---
 name: ehr-harness
-description: "EHR 프로젝트 하네스 자동 생성 메타 스킬. '하네스 만들어줘', '하네스 생성해줘', '하네스 설계해줘', '하네스 구성해줘', '하네스 구축해줘' 등의 키워드에 트리거."
+description: "EHR 프로젝트 하네스 자동 생성 메타 스킬. '하네스 만들어줘', '하네스 생성해줘', '하네스 설계해줘', '하네스 구성해줘', '하네스 구축해줘', '하네스 업데이트', '하네스 재생성', '하네스 수정', '하네스 갱신', '이수하네스', 'ehr하네스', 'EHR하네스', 'e-hr하네스', 'E-HR하네스', '인사시스템 하네스', '인사하네스' 등의 키워드에 트리거."
 ---
 
 # EHR Harness Generator
@@ -12,10 +12,12 @@ EHR 프로젝트를 심층 분석하여 맞춤형 AI 코딩 하네스를 자동 
 ## Step 0: 플러그인 위치 탐색
 
 ```bash
-Glob: "**/ehr-harness-plugin/profiles/ehr*/skeleton/AGENTS.md.skel"
+Glob: "**/ehr-harness/profiles/ehr*/skeleton/AGENTS.md.skel"
 ```
 
-→ 결과에서 `ehr-harness-plugin/` 경로를 추출하여 `PLUGIN_ROOT`로 설정.
+→ 결과에서 `profiles/` 의 상위 디렉토리를 추출하여 `PLUGIN_ROOT`로 설정.
+  - marketplace 설치 시: `~/.claude/plugins/cache/ehr-harness/ehr-harness/<version>/`
+  - git clone 시: `.../ehr-harness-plugin/plugins/ehr-harness/`
 → 못 찾으면 사용자에게 플러그인 경로를 물어본다.
 
 ---

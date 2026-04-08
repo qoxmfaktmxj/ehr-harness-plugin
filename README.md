@@ -86,26 +86,32 @@ your-ehr5-project/
 
 ## 2. 플러그인 설치 방법
 
-### 방법 1: 글로벌 스킬 설치 (권장)
+### 방법 1: Marketplace 설치 (권장)
+
+```bash
+# 1. 마켓플레이스 등록
+/plugin marketplace add qoxmfaktmxj/ehr-harness-plugin
+
+# 2. 플러그인 설치
+/plugin install ehr-harness@ehr-harness
+
+# 3. 이후 업데이트
+/plugin marketplace update
+```
+
+설치 후, 어떤 EHR 프로젝트에서든 "하네스 만들어줘"를 사용할 수 있다.
+
+### 방법 2: 로컬 설치 (개발/테스트용)
 
 ```bash
 # 1. 플러그인 레포 클론
 git clone https://github.com/qoxmfaktmxj/ehr-harness-plugin.git ~/Desktop/dev/ehr-harness-plugin
 
-# 2. 메타 스킬을 글로벌 Claude Code 스킬로 설치
-cp -r ~/Desktop/dev/ehr-harness-plugin/skills/ehr-harness ~/.claude/skills/
+# 2. 로컬 마켓플레이스로 등록
+/plugin marketplace add ~/Desktop/dev/ehr-harness-plugin
 
-# 3. 설치 확인
-ls ~/.claude/skills/ehr-harness/SKILL.md
-```
-
-설치 후, 어떤 EHR 프로젝트에서든 "하네스 만들어줘"를 사용할 수 있다.
-
-### 방법 2: 프로젝트별 설치
-
-```bash
-# EHR 프로젝트 루트에서
-cp -r /path/to/ehr-harness-plugin/skills/ehr-harness .claude/skills/
+# 3. 플러그인 설치
+/plugin install ehr-harness@ehr-harness
 ```
 
 ### 사전 요구사항
@@ -327,7 +333,7 @@ Codex CLI:
 ### Phase 1: 플러그인 위치 탐색
 
 ```
-Glob: "**/ehr-harness-plugin/profiles/ehr*/skeleton/AGENTS.md.skel"
+Glob: "**/ehr-harness/profiles/ehr*/skeleton/AGENTS.md.skel"
 → 플러그인 루트 디렉토리 확정
 → 프로파일 디렉토리 경로 확보
 ```
@@ -638,40 +644,47 @@ SI 프로젝트마다 달라지는 부분:
 ```
 ehr-harness-plugin/
 │
-├── skills/
-│   └── ehr-harness/
-│       └── SKILL.md              # 메타 스킬 (이 플러그인의 핵심)
-│                                 # 설치: ~/.claude/skills/ehr-harness/SKILL.md
+├── .claude-plugin/
+│   └── marketplace.json          # 마켓플레이스 카탈로그
 │
-├── profiles/
-│   ├── shared/                   # 버전 무관 공통 파일
-│   │   ├── settings.json         # .claude/settings.json → PreToolUse 훅
-│   │   ├── hooks/
-│   │   │   └── db-read-only.sh   # .claude/hooks/ → DML/DDL 차단
-│   │   ├── .codex/
-│   │   │   └── config.toml       # Codex CLI 설정
-│   │   └── .gitignore            # 런타임 산출물 제외
-│   │
-│   ├── ehr4/                     # EHR4 프로파일
-│   │   ├── skeleton/             # 변수 치환용 문서 스켈레톤
-│   │   │   ├── AGENTS.md.skel    # {{MODULE_MAP}} 등 플레이스홀더
-│   │   │   ├── CLAUDE.md.skel
-│   │   │   └── README.md.skel
-│   │   ├── agents/               # 에이전트 (3개, 대부분 고정)
-│   │   │   ├── screen-builder.md
-│   │   │   ├── procedure-tracer.md
-│   │   │   └── release-reviewer.md   # EHR4 전용
-│   │   └── skills/               # 스킬 (5개, 일부 변수 치환)
-│   │       ├── screen-builder/SKILL.md.skel
-│   │       ├── codebase-navigator/SKILL.md.skel
-│   │       ├── procedure-tracer/SKILL.md.skel
-│   │       ├── db-query/SKILL.md.skel
-│   │       └── domain-knowledge/SKILL.md   # 고정 (744줄)
-│   │
-│   └── ehr5/                     # EHR5 프로파일 (동일 구조)
-│       ├── skeleton/
-│       ├── agents/               # 에이전트 (2개)
-│       └── skills/               # 스킬 (5개)
+├── plugins/
+│   └── ehr-harness/              # 플러그인 본체
+│       ├── .claude-plugin/
+│       │   └── plugin.json       # 플러그인 매니페스트 (버전 관리)
+│       │
+│       ├── skills/
+│       │   └── ehr-harness/
+│       │       └── SKILL.md      # 메타 스킬 (이 플러그인의 핵심)
+│       │
+│       └── profiles/
+│           ├── shared/           # 버전 무관 공통 파일
+│           │   ├── settings.json # .claude/settings.json → PreToolUse 훅
+│           │   ├── hooks/
+│           │   │   └── db-read-only.sh  # DML/DDL 차단
+│           │   ├── .codex/
+│           │   │   └── config.toml      # Codex CLI 설정
+│           │   └── .gitignore
+│           │
+│           ├── ehr4/             # EHR4 프로파일
+│           │   ├── skeleton/     # 변수 치환용 문서 스켈레톤
+│           │   │   ├── AGENTS.md.skel
+│           │   │   ├── CLAUDE.md.skel
+│           │   │   └── README.md.skel
+│           │   ├── agents/       # 에이전트 (3개)
+│           │   │   ├── screen-builder.md
+│           │   │   ├── procedure-tracer.md
+│           │   │   └── release-reviewer.md   # EHR4 전용
+│           │   └── skills/       # 스킬 (5개)
+│           │       ├── screen-builder/SKILL.md.skel
+│           │       ├── codebase-navigator/SKILL.md.skel
+│           │       ├── procedure-tracer/SKILL.md.skel
+│           │       ├── db-query/SKILL.md.skel
+│           │       └── domain-knowledge/SKILL.md
+│           │
+│           └── ehr5/             # EHR5 프로파일 (동일 구조)
+│               ├── skeleton/
+│               ├── agents/       # 에이전트 (2개)
+│               └── skills/       # 스킬 (5개)
 │
 ├── README.md                     # 이 파일
 └── .gitignore
