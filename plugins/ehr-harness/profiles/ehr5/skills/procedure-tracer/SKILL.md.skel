@@ -9,7 +9,71 @@ description: "EHR5 프로시저 체인 분석 및 동적 SQL 추적 스킬. '프
 
 - 프로시저/함수/트리거 **소스 파일이 이 레포에 없다** (Oracle에만 존재)
 - 매퍼 XML의 CALL문과 Java 서비스의 dao.excute() 호출로 **간접 추적**한다
-- 프로시저 내부 로직은 Oracle에서 직접 확인해야 한다
+- 프로시저 내부 로직은 DB 모드에 따라 다르게 확인한다:
+  - `direct` 모드: Oracle USER_SOURCE에서 직접 조회
+  - `dump` 모드: DDL 덤프 폴더의 파일에서 grep/read
+  - `code-only` 모드: 매퍼 XML grep만 (프로시저 내부 로직 확인 불가)
+
+---
+
+## Step 0: DB 모드 판정 (매 호출 시 1회)
+
+하네스 생성 시 Step 2-J에서 결정된 DB 모드를 확인한다.
+
+```bash
+DB_MODE=$(cat .claude/skills/ehr-db-query/DB_MODE 2>/dev/null || echo "code-only")
+
+case "$DB_MODE" in
+  direct)
+    # 기존 동작: Oracle DB 직접 쿼리
+    # USER_SOURCE, USER_OBJECTS, USER_TRIGGERS 등 조회 가능
+    echo "DB 모드: direct (DB 직접 쿼리)"
+    ;;
+  dump)
+    # DUMP_INDEX.json 참조
+    DUMP_INDEX=".claude/skills/ehr-db-query/DUMP_INDEX.json"
+    if [ ! -f "$DUMP_INDEX" ]; then
+      echo "⚠ DUMP 모드인데 DUMP_INDEX.json이 없음 → code-only로 fallback"
+      DB_MODE="code-only"
+    else
+      DUMP_DIR=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$DUMP_INDEX','utf8')).dump_dir)")
+      echo "DB 모드: dump (덤프 폴더: $DUMP_DIR)"
+    fi
+    ;;
+  code-only)
+    echo "DB 모드: code-only (매퍼 XML grep만 — 프로시저 내부 로직 확인 불가)"
+    ;;
+esac
+```
+
+**DB 모드별 프로시저 소스 조회 방법**:
+
+### direct 모드
+```sql
+SELECT LINE, TEXT FROM USER_SOURCE
+WHERE NAME = '{프로시저명}' AND TYPE IN ('PROCEDURE','PACKAGE BODY')
+ORDER BY LINE
+```
+→ `ehr-db-query` 스킬에 위임.
+
+### dump 모드
+```bash
+# DUMP_INDEX.json에서 객체 lookup
+PROC_FILE=$(node -e "
+  const idx = JSON.parse(require('fs').readFileSync('$DUMP_INDEX','utf8'));
+  const obj = idx.objects['{프로시저명}'];
+  console.log(obj ? obj.file : '');
+")
+if [ -n "$PROC_FILE" ]; then
+  Read: $PROC_FILE
+else
+  echo "⚠ 덤프에 해당 객체 없음: {프로시저명}"
+fi
+```
+
+### code-only 모드
+- 매퍼 XML grep까지만 가능
+- 프로시저 내부 로직은 "확인 불가"로 보고하고, 호출 관계만 추적
 
 ---
 

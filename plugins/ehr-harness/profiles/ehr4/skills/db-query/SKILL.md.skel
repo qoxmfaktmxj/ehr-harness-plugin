@@ -12,6 +12,106 @@ description: "Oracle/Tibero DB SELECT 조회 스킬. 프로시저 소스, 테이
 
 ---
 
+## Step 0: DB 모드 판정 (매 호출 시 1회)
+
+하네스 생성 시 Step 2-J에서 결정된 DB 모드를 확인한다. 이 값에 따라
+이 스킬의 동작이 완전히 달라진다.
+
+```bash
+DB_MODE=$(cat .claude/skills/ehr-db-query/DB_MODE 2>/dev/null || echo "code-only")
+echo "DB 모드: $DB_MODE"
+```
+
+| 모드 | 이 스킬의 역할 |
+|---|---|
+| `direct` | Oracle/Tibero에 JDBC로 직접 연결해 SELECT 실행 (Step 1~3 사용) |
+| `dump` | DUMP_INDEX.json을 읽어 덤프 폴더 파일을 grep/read로 조회 (Step D 사용) |
+| `code-only` | 이 스킬은 사용 불가 — 사용자에게 "DB 모드가 code-only입니다. `/ehr-harness` 다시 실행 후 [2] 덤프 폴더 선택으로 갱신하세요" 안내 |
+
+---
+
+## Step D: DUMP 모드 — 덤프 폴더 기반 조회
+
+`DB_MODE=dump`일 때만 수행. 그 외 모드면 이 섹션 스킵.
+
+### D-1. DUMP_INDEX 로드
+
+```bash
+DUMP_INDEX=".claude/skills/ehr-db-query/DUMP_INDEX.json"
+
+if [ ! -f "$DUMP_INDEX" ]; then
+  echo "⚠ DUMP_INDEX.json이 없습니다. /ehr-harness 다시 실행해주세요."
+  exit 1
+fi
+
+DUMP_DIR=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$DUMP_INDEX','utf8')).dump_dir)")
+FORMAT=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$DUMP_INDEX','utf8')).format)")
+
+echo "덤프 폴더: $DUMP_DIR (형태: $FORMAT)"
+```
+
+### D-2. 객체 lookup
+
+DUMP_INDEX.json의 `objects` 맵에서 이름으로 파일 경로를 조회한다.
+
+```bash
+OBJ_FILE=$(node -e "
+  const idx = JSON.parse(require('fs').readFileSync('$DUMP_INDEX','utf8'));
+  const obj = idx.objects['{객체명}'];
+  if (obj) {
+    console.log(obj.type + '|' + obj.file);
+  } else {
+    console.log('');
+  }
+")
+```
+
+발견 시:
+```
+Read: <파일 경로>
+```
+
+미발견 시 — 인덱스에 없지만 파일은 있을 수 있으므로 grep으로 재탐색:
+```bash
+# 파일명 기반 직접 검색
+find "$DUMP_DIR" -type f -iname "*{객체명}*" 2>/dev/null
+
+# 내용 기반 grep (CREATE 키워드)
+grep -rilE "CREATE\s+(OR\s+REPLACE\s+)?\w+\s+{객체명}" "$DUMP_DIR" 2>/dev/null
+```
+
+### D-3. 자주 쓰는 DUMP 모드 조회 패턴
+
+#### 프로시저 소스 조회
+```bash
+grep -rn "CREATE\s\+OR\s\+REPLACE\s\+PROCEDURE\s\+{프로시저명}" "$DUMP_DIR"
+```
+
+#### 테이블 컬럼 구조
+```bash
+# CREATE TABLE 문에서 컬럼 정의 추출
+grep -A 50 "CREATE\s\+TABLE\s\+{테이블명}" <파일>
+```
+
+#### 특정 테이블을 참조하는 객체 검색
+```bash
+grep -rilE "{테이블명}" "$DUMP_DIR" 2>/dev/null
+```
+
+#### 프로시저 내 호출 관계 (서브 프로시저 찾기)
+```bash
+grep -oE "(P_|PKG_|F_)\w+" <프로시저 파일> | sort -u
+```
+
+### D-4. DUMP 모드 제약
+
+- **동적 쿼리 불가** — 텍스트 파일 grep이라 WHERE 조건, JOIN 등 불가
+- **COMMENTS 부재** — DDL 덤프가 COMMENT 문을 포함하지 않는 경우가 많음
+- **런타임 데이터 없음** — 스키마/소스만 확인 가능
+- **버전 차이** — 덤프 시점과 운영 DB가 다를 수 있음
+
+---
+
 ## Step 1: 접속 정보 파악
 
 프로젝트의 DB 접속 정보는 아래 순서로 확인한다. **하드코딩 금지** — 반드시 파일에서 파싱.

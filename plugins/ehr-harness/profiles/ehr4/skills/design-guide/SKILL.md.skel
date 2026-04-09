@@ -1,0 +1,189 @@
+---
+name: ehr-design-guide
+description: "IDS(ISU Design System) 디자인 가이드 조회 스킬. 프로젝트의 Storybook에서 컴포넌트 사용법·레이아웃·네이밍 규칙을 확인할 때 사용한다. 'IDS', '디자인 시스템', 'Storybook', 'Button 컴포넌트', '레이아웃', 'SearchSheet', 'DoubleSheet', 'Atomic Design', 'IDS 컴포넌트', 'ids-btn', 'IDS Form', '디자인 가이드', '컴포넌트 사용법', '네이밍 룰', 'Legacy JSP 마이그레이션' 등의 키워드에 트리거."
+---
+
+# IDS Design Guide — Storybook 기반 컴포넌트 참조 스킬
+
+이 스킬은 프로젝트의 Storybook 빌드 산출물(`{{STORYBOOK_PATH}}`)에서
+IDS(ISU Design System) 컴포넌트 가이드를 조회한다.
+
+## 기본 정보
+
+- **Storybook 경로**: `{{STORYBOOK_PATH}}`
+- **Storybook 버전**: `{{STORYBOOK_VERSION}}`
+- **총 컴포넌트 수**: {{TOTAL_TITLES}}개
+- **사전 추출 컴포넌트**: {{PRE_EXTRACT_LIST}}
+
+---
+
+## Step 1: Freshness 체크 (매 호출 시 1회)
+
+Storybook이 재빌드되었는지 확인한다. 빌드 시점이 다르면 사전 추출된
+references가 stale일 수 있으므로 사용자에게 경고한다.
+
+```bash
+SB_PATH="{{STORYBOOK_PATH}}"
+MANIFEST=".claude/skills/ehr-design-guide/MANIFEST.json"
+
+if [ ! -f "$SB_PATH/project.json" ]; then
+  echo "⚠ Storybook이 삭제됐거나 경로가 변경됐습니다: $SB_PATH"
+  echo "   /ehr-harness 다시 실행을 권장합니다."
+  exit 0
+fi
+
+CUR_GEN=$(node -e "
+  console.log(JSON.parse(require('fs').readFileSync('$SB_PATH/project.json','utf8')).generatedAt)
+")
+OLD_GEN=$(node -e "
+  try {
+    console.log(JSON.parse(require('fs').readFileSync('$MANIFEST','utf8')).generated_at)
+  } catch(e) { console.log('') }
+")
+
+if [ -n "$OLD_GEN" ] && [ "$CUR_GEN" != "$OLD_GEN" ]; then
+  echo "⚠ Storybook이 재빌드됐습니다."
+  echo "   이전 추출 시점과 다르므로 사전 추출된 references가 stale일 수 있습니다."
+  echo "   /ehr-harness 다시 실행해서 디자인 가이드를 갱신하는 걸 권장합니다."
+  # 계속 진행 가능 — 경고만 띄움
+fi
+```
+
+---
+
+## Step 2: 카탈로그 조회 (인덱스)
+
+사용자가 어떤 컴포넌트가 있는지 모를 때, 먼저 카탈로그를 보여준다.
+
+```
+Read: .claude/skills/ehr-design-guide/references/INDEX.md
+```
+
+INDEX.md는 카테고리별 컴포넌트 목록을 담고 있다:
+- `00-guides/` — 디자인 시스템 개요, 네이밍 규칙, 마이그레이션
+- `01-atoms/` — Button, Chip, FormSelect, Table, Text 등 기본 빌딩 블록
+- `02-modules/` — PageTitle, SearchCondition 등 조합 컴포넌트
+- `03-pages/` — DoubleSheet, SearchDoubleSheet, SheetOnly 등 전체 페이지 레이아웃
+- `04-utilities/` — Background, Flex, Grid, Shadow 등 유틸리티
+- `05-modal/` — Modal
+
+---
+
+## Step 3: 컴포넌트 상세 조회 (사전 추출 vs JIT)
+
+### 3-A. 사전 추출된 컴포넌트
+
+다음 10개는 `references/<name>.md`로 이미 마크다운 변환되어 있다.
+바로 읽으면 된다.
+
+```
+Read: .claude/skills/ehr-design-guide/references/<name>.md
+```
+
+사전 추출 목록:
+- `00-Introduction` — IDS 소개·철학·빠른 시작
+- `01-Naming-Rules` — 클래스/변수 네이밍 규칙
+- `02-Legacy-JSP-Migration` — 기존 JSP에서 IDS로 전환하는 법
+- `03-Quick-Reference` — 자주 쓰는 컴포넌트 치트시트
+- `Button` — 버튼 (ids-btn, variants)
+- `Chip` — 칩
+- `FormSelect` — 셀렉트 박스
+- `FormSelect2` — Select2 기반 고급 셀렉트
+- `Table` — 테이블
+- `Text` — 텍스트 스타일
+
+### 3-B. JIT 추출 (나머지 36개)
+
+사전 추출되지 않은 컴포넌트는 요청 시점에 Storybook 빌드 JS에서 직접 추출한다.
+
+**절차**:
+
+1. MANIFEST.json 로드하여 `title_to_js` 매핑 조회
+   ```bash
+   JS_PATH=$(node -e "
+     const m = JSON.parse(require('fs').readFileSync('$MANIFEST','utf8'));
+     console.log(m.title_to_js['<요청된 title>'] || '')
+   ")
+   ```
+2. `$SB_PATH/$JS_PATH` 파일을 Read 도구로 읽기
+3. JSX 함수 호출 패턴을 마크다운으로 직접 변환 (아래 변환 규칙 참조)
+4. **변환 결과는 디스크에 저장하지 않는다** — 매번 최신 상태 보장
+
+### 3-C. JSX → Markdown 변환 규칙
+
+빌드된 Storybook JS 파일은 다음과 같은 패턴으로 구성되어 있다:
+
+```js
+n.jsx(s.h1,{id:"ids-isu-design-system",children:"IDS (ISU Design System)"})
+n.jsx(s.p,{children:"IDS는 일관되고 효율적인 UI 개발을 위한..."})
+n.jsx(s.pre,{children:n.jsx(s.code,{className:"language-html",children:`<button class="ids-btn"/>`})})
+```
+
+변환 매핑:
+
+| JSX 함수 호출 | 마크다운 출력 |
+|---|---|
+| `n.jsx(s.h1, ..., children: "X")` | `# X` |
+| `n.jsx(s.h2, ..., children: "X")` | `## X` |
+| `n.jsx(s.h3, ..., children: "X")` | `### X` |
+| `n.jsx(s.p, ..., children: "X")` | 단락 텍스트 |
+| `n.jsx(s.ol/ul, ..., children: [...])` | 번호/불릿 리스트 |
+| `n.jsx(s.li, ..., children: ...)` | 리스트 항목 |
+| `n.jsx(s.strong, ..., children: "X")` | `**X**` |
+| `n.jsx(s.em, ..., children: "X")` | `*X*` |
+| `n.jsx(s.code, ..., children: "X")` (인라인) | `` `X` `` |
+| `n.jsx(s.pre, ..., children: n.jsx(s.code, className: "language-XXX", children: \`...\`))` | ```` ```XXX ... ``` ```` (언어 표시된 펜스 블록) |
+| `n.jsx(s.hr)` | `---` |
+| `n.jsxs(...)` | `n.jsx`와 동일 (복수 children 버전) |
+
+**중첩 처리**: `n.jsx(s.p, ..., children: [...])`의 children이 배열이면
+각 요소를 순서대로 변환하여 단락 내부에 이어붙인다.
+
+---
+
+## Step 4: 대표 사용 시나리오
+
+### Q1. "Button 어떻게 써?"
+→ `references/Button.md` 읽기 (사전 추출)
+
+### Q2. "SearchCondition 컴포넌트 알려줘"
+→ 사전 추출 없음 → MANIFEST.json에서 `02-modules/SearchCondition` title을 찾아
+  `title_to_js` 매핑으로 JS 경로 얻기 → JIT 추출 → 사용자에게 제공
+
+### Q3. "IDS 컴포넌트 다 뭐 있어?"
+→ `references/INDEX.md` 읽기
+
+### Q4. "Naming 규칙 뭐야?"
+→ `references/01-Naming-Rules.md` 읽기 (사전 추출)
+
+### Q5. "레거시 JSP를 IDS로 바꾸려면?"
+→ `references/02-Legacy-JSP-Migration.md` 읽기 (사전 추출)
+
+---
+
+## Step 5: 카탈로그에 없는 컴포넌트 요청
+
+사용자가 요청한 컴포넌트 이름이 MANIFEST.json의 `title_to_js` 어느 키에도
+매칭되지 않으면:
+
+```
+Read: .claude/skills/ehr-design-guide/references/INDEX.md
+→ 사용자에게 카탈로그 보여주면서 "이 중에 찾으시는 게 있나요?" 질문
+```
+
+이름만 약간 다른 경우 (대소문자, 공백, 번호 prefix 등)를 자동으로 보정한다:
+- "button" → "01-atoms/Button"
+- "searchsheet" → "03-pages/SearchSheet"
+
+---
+
+## 주의사항
+
+1. **Storybook 소스 .mdx는 존재하지 않음** — 빌드된 JS만 있다. JIT 추출은
+   반드시 `$SB_PATH/assets/*.js`에서 수행한다.
+2. **캐시하지 않음** — JIT 추출 결과를 `references/`에 저장하면 다음 번에
+   stale 위험이 생긴다. 매번 새로 추출한다.
+3. **한글 콘텐츠** — UTF-8이 기본이다. JSX 함수 호출의 `children: "..."` 문자열은
+   그대로 마크다운에 옮겨도 OK.
+4. **코드 펜스 내 개행** — 빌드 산출물은 `\r\n`이 포함될 수 있다. 변환 시
+   `\r`을 제거하여 깨끗한 마크다운으로 출력한다.

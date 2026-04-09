@@ -22,6 +22,86 @@ Glob: "**/ehr-harness/profiles/ehr*/skeleton/AGENTS.md.skel"
 
 ---
 
+## Step 0.5: Superpowers 의존성 검증
+
+EHR 하네스는 Superpowers의 메타 스킬(brainstorming, writing-plans, tdd-workflow,
+verification-before-completion, systematic-debugging)을 활용해 안전한 개발 흐름을
+보장한다. 이 의존성이 없으면 **하네스 생성 자체를 중단**한다.
+
+```bash
+SETTINGS="$HOME/.claude/settings.json"
+
+if [ ! -f "$SETTINGS" ]; then
+  echo "⚠ Claude Code 설정 파일을 찾을 수 없습니다: $SETTINGS"
+  exit 1
+fi
+
+# enabledPlugins에서 superpowers@* 패턴 매칭 (어떤 마켓이든 인정)
+# - superpowers@superpowers-marketplace (obra 본인 운영)
+# - superpowers@claude-plugins-official  (Anthropic 미러)
+# 주의: SETTINGS를 Node 서브프로세스에 환경변수로 전달해야 함
+#       (export 없이는 process.env.SETTINGS가 undefined)
+HAS_SP=$(SETTINGS="$SETTINGS" node -e "
+  try {
+    const fs = require('fs');
+    const s = JSON.parse(fs.readFileSync(process.env.SETTINGS, 'utf8'));
+    const ep = s.enabledPlugins || {};
+    const found = Object.keys(ep).some(k =>
+      k.startsWith('superpowers@') && ep[k] === true
+    );
+    console.log(found ? 'yes' : 'no');
+  } catch(e) { console.log('error'); }
+" 2>/dev/null)
+
+if [ "$HAS_SP" != "yes" ]; then
+  cat <<'EOF'
+═══════════════════════════════════════════════════════════════
+  ⚠ Superpowers 플러그인이 필요합니다.
+═══════════════════════════════════════════════════════════════
+
+  EHR 하네스는 Superpowers의 메타 스킬을 활용합니다:
+    • brainstorming           — 코드 작성 전 설계 합의
+    • writing-plans           — 변경 전 단계별 계획서
+    • test-driven-development — 테스트 우선 개발
+    • verification-before-completion — 완료 검증
+    • systematic-debugging    — 가설 기반 디버깅
+
+  이게 없으면 화면 생성/프로시저 분석이 반쪽이 됩니다.
+
+  ┌─────────────────────────────────────────────────────────┐
+  │ 설치 방법                                                │
+  │                                                          │
+  │ 1) Claude Code에서 다음 두 명령을 차례로 실행:           │
+  │                                                          │
+  │   /plugin marketplace add obra/superpowers-marketplace   │
+  │   /plugin install superpowers@superpowers-marketplace    │
+  │                                                          │
+  │ 2) 설치 후 다시 실행 (둘 중 하나):                       │
+  │                                                          │
+  │   • 슬래시 명령: /ehr-harness                             │
+  │   • 자연어:      "이수하네스 만들어줘"                    │
+  │                                                          │
+  └─────────────────────────────────────────────────────────┘
+
+  GitHub: https://github.com/obra/superpowers
+  Maintainer: Jesse Vincent
+
+  (참고: Claude는 보안상 사용자 동의 없이 플러그인을 자동
+   설치할 수 없습니다. /plugin 명령은 직접 실행이 필요합니다.)
+
+═══════════════════════════════════════════════════════════════
+EOF
+  exit 0
+fi
+
+echo "✓ Superpowers 플러그인 확인됨"
+```
+
+→ Superpowers 미설치 시 안내 메시지 출력 후 **즉시 종료**.
+→ 설치됨 확인 후 Step 1로 진입.
+
+---
+
 ## Step 1: EHR 버전 감지
 
 아래 순서로 판정한다. 첫 매칭에서 확정.
@@ -266,7 +346,14 @@ done
 → 추출된 패턴을 `CODE_EXAMPLES`에 저장.
 → 너무 길면 파일 경로 참조 링크로 대체.
 
-### 2-J. DB 접속 정보 탐지
+### 2-J. DB 접속 정보 탐지 + 인터랙티브 폴백
+
+이 단계가 끝나면 다음 두 값이 결정된다:
+
+- `DB_MODE` ∈ {`direct`, `dump`, `code-only`}
+- `DB_CONNECTION` (direct 모드일 때만) 또는 `DUMP_DIR` (dump 모드일 때만)
+
+#### 2-J-1. 접속 정보 자동 탐지
 
 ```bash
 # EHR5: application.properties / application.yml
@@ -282,8 +369,233 @@ find . -name "*.xml" -path "*/spring/*" -exec grep -l "dataSource" {} \; 2>/dev/
 find . -name "ojdbc*.jar" -o -name "tibero*.jar" 2>/dev/null
 ```
 
-→ 연결 정보 발견 → `DB_CONNECTION`에 저장
-→ 미발견 → "⚠ DB 접속 정보 미발견. db-query 스킬의 접속 정보 섹션을 수동 입력하세요."
+→ 발견되면 `DB_CONNECTION` 후보로 저장 (host/port/sid/user/pass).
+
+#### 2-J-2. 분기: 연결 시도 결과에 따라
+
+**Case A: 접속 정보 발견 → 실제 연결 시도**
+
+```bash
+if [ -n "$DB_CONNECTION" ]; then
+  # sqlplus 또는 jdbc test로 connection 시도
+  # (드라이버 jar가 있으면 javac로 간단한 test 클래스 컴파일 후 실행)
+  CONNECT_RESULT=$(test_db_connection "$DB_CONNECTION" 2>&1)
+
+  if [ $? -eq 0 ]; then
+    DB_MODE="direct"
+    echo "✓ DB 연결 성공"
+    # 2-J-5로 진행 (direct 모드 저장)
+  else
+    # 역질문 ① 발동 — 접속 실패 분기
+    ASK_REASON="failure"
+    ASK_DETAIL="$CONNECT_RESULT"
+  fi
+else
+  # 역질문 ② 발동 — 접속 정보 미발견 분기
+  ASK_REASON="missing"
+  ASK_DETAIL=""
+fi
+```
+
+#### 2-J-3. 역질문 (AskUserQuestion 도구 사용)
+
+연결 실패(`failure`) 또는 미발견(`missing`)일 때, 사용자에게 구조화된 선택지를 제공한다.
+
+**역질문 ① (failure)**:
+```
+질문: "DB 접속 정보를 찾았지만 연결에 실패했습니다. 어떻게 진행할까요?"
+헤더: "DB 폴백"
+  - 1: "접속 정보 직접 입력" — host/port/sid/user/pass 직접 알려주기
+  - 2: "DDL 덤프 폴더 사용" — DB 객체가 파일로 있는 폴더 경로 제공
+  - 3: "코드 grep만 진행" — 불완전해도 코드 분석만으로 구성
+```
+
+**역질문 ② (missing)**:
+```
+질문: "DB 접속 정보를 찾지 못했습니다. 어떻게 진행할까요?"
+헤더: "DB 폴백"
+  - 1: "접속 정보 직접 입력"
+  - 2: "DDL 덤프 폴더 사용"
+  - 3: "코드 grep만 진행"
+```
+
+#### 2-J-4. 사용자 응답 처리
+
+**[1] 접속 정보 직접 입력 (DIRECT 재시도)**
+
+사용자에게 자유 텍스트로 접속 정보 받기:
+```
+"다음 형식으로 접속 정보를 알려주세요:
+  host: <값>
+  port: <값>
+  sid: <값>
+  user: <값>
+  password: <값>"
+```
+
+→ 응답 파싱 후 `DB_CONNECTION` 재구성 → 2-J-2 재시도.
+→ **3회 연속 실패 시 자동으로 [3] CODE-ONLY로 fallback**.
+
+**[2] DDL 덤프 폴더 사용 (DUMP 모드)**
+
+```bash
+# 사용자에게 폴더 경로 요청
+echo "DDL/프로시저 덤프 폴더의 경로를 알려주세요."
+echo "예: ./db/schema/  또는  C:/EHR_DUMP/"
+echo "(절대경로·상대경로 모두 OK. 확장자는 무관. 내부는 UTF-8 가정)"
+
+# 경로 정규화 (상대경로 → 절대경로)
+DUMP_DIR=$(realpath "$USER_INPUT" 2>/dev/null)
+if [ ! -d "$DUMP_DIR" ]; then
+  echo "⚠ 유효하지 않은 경로: $USER_INPUT"
+  # 재입력 루프 (최대 3회)
+fi
+
+# 형태 자동 판정 (F1~F4, F5는 바이너리라 미지원)
+FORMAT=$(detect_dump_format "$DUMP_DIR")
+# - F1: 단일 SQL 파일
+# - F2: 객체 타입별 서브폴더 (tables/, procedures/, packages/, functions/, triggers/)  ★ 대부분
+# - F3: 객체별 개별 파일 (한 폴더에 다 섞임)
+# - F4: Toad/SQL Developer 카테고리별 익스포트
+# - F5: .dmp 바이너리 → 미지원, "impdp로 import 후 직접 연결 필요" 안내 후 CODE-ONLY fallback
+
+# 전체 파일 스캔 (확장자 무시)
+TOTAL_FILES=$(find "$DUMP_DIR" -type f 2>/dev/null | wc -l)
+
+# 객체 타입별 카운트 (EHR 컨벤션 접두어 기반)
+TABLE_CNT=$(grep -rilE "CREATE\s+(OR\s+REPLACE\s+)?TABLE\s+T_" "$DUMP_DIR" 2>/dev/null | wc -l)
+PROC_CNT=$(grep -rilE "CREATE\s+(OR\s+REPLACE\s+)?PROCEDURE\s+P_" "$DUMP_DIR" 2>/dev/null | wc -l)
+PKG_CNT=$(grep -rilE "CREATE\s+(OR\s+REPLACE\s+)?PACKAGE(\s+BODY)?\s+PKG_" "$DUMP_DIR" 2>/dev/null | wc -l)
+FUNC_CNT=$(grep -rilE "CREATE\s+(OR\s+REPLACE\s+)?FUNCTION\s+F_" "$DUMP_DIR" 2>/dev/null | wc -l)
+TRIG_CNT=$(grep -rilE "CREATE\s+(OR\s+REPLACE\s+)?TRIGGER\s+TRG_" "$DUMP_DIR" 2>/dev/null | wc -l)
+
+# 결과 보고
+cat <<EOF
+═══════════════════════════════════════════════════════════════
+  📊 덤프 폴더 스캔 결과
+═══════════════════════════════════════════════════════════════
+  경로:     $DUMP_DIR
+  형태:     $FORMAT
+  총 파일:  $TOTAL_FILES개
+
+  객체 타입별:
+    • 테이블:    $TABLE_CNT
+    • 프로시저:  $PROC_CNT
+    • 패키지:    $PKG_CNT
+    • 함수:      $FUNC_CNT
+    • 트리거:    $TRIG_CNT
+
+  이 정보로 진행할까요?
+EOF
+
+# AskUserQuestion으로 y/n 확인 → y면 DUMP_INDEX.json 생성
+```
+
+**DUMP_INDEX.json 스키마** (`.claude/skills/ehr-db-query/DUMP_INDEX.json`로 저장):
+
+```json
+{
+  "schema_version": 1,
+  "dump_dir": "C:/EHR_PROJECT/db_dump/",
+  "format": "F2",
+  "scanned_at": "2026-04-09T13:45:00",
+  "encoding": "utf-8",
+  "stats": {
+    "total_files": 487,
+    "tables": 234,
+    "procedures": 156,
+    "packages": 12,
+    "functions": 45,
+    "triggers": 40
+  },
+  "objects": {
+    "P_CPN_CAL_PAY_MAIN": {
+      "type": "PROCEDURE",
+      "file": "C:/EHR_PROJECT/db_dump/procedures/P_CPN_CAL_PAY_MAIN.sql",
+      "line": 1
+    },
+    "PKG_CPN_SEP": {
+      "type": "PACKAGE",
+      "file": "C:/EHR_PROJECT/db_dump/packages/PKG_CPN_SEP.pkb",
+      "line": 1
+    }
+  }
+}
+```
+
+→ `DB_MODE="dump"`, `DUMP_DIR="$DUMP_DIR"`
+
+**[3] 코드 grep만 진행 (CODE-ONLY)**
+
+```bash
+DB_MODE="code-only"
+echo "⚠ 코드 grep 기반으로만 진행. 프로시저/트리거 정보가 불완전할 수 있습니다."
+```
+
+#### 2-J-5. DB_MODE 저장
+
+```bash
+# 최종 결정된 DB_MODE를 파일로 저장 (후속 스킬이 읽음)
+mkdir -p .claude/skills/ehr-db-query
+echo "$DB_MODE" > .claude/skills/ehr-db-query/DB_MODE
+```
+
+→ 이 파일은 `ehr-procedure-tracer`와 `ehr-db-query` 스킬이 동작 모드를 분기할 때 참조한다.
+
+### 2-K. 디자인 가이드 (Storybook) 탐지
+
+고정 경로에서 Storybook 빌드 산출물을 찾는다. 광역 탐색·다중 Storybook은 지원하지 않는다.
+
+```bash
+SB_PATH="src/main/resources/static/guide/storybook-static"
+
+if [ ! -d "$SB_PATH" ] || [ ! -f "$SB_PATH/project.json" ]; then
+  DESIGN_GUIDE=false
+  echo "디자인 가이드 미발견 → ehr-design-guide 스킬 스킵"
+  # Step 3으로 진행 (디자인 가이드 생성 없음)
+else
+  DESIGN_GUIDE=true
+  echo "✓ 디자인 가이드 발견: $SB_PATH"
+
+  # project.json 메타 추출
+  SB_GENERATED_AT=$(node -e "
+    console.log(JSON.parse(require('fs').readFileSync('$SB_PATH/project.json','utf8')).generatedAt)
+  ")
+  SB_VERSION=$(node -e "
+    console.log(JSON.parse(require('fs').readFileSync('$SB_PATH/project.json','utf8')).storybookVersion)
+  ")
+
+  # index.json 파싱 → 카테고리 트리 + title→JS 매핑
+  node -e "
+    const idx = JSON.parse(require('fs').readFileSync('$SB_PATH/index.json','utf8'));
+    const titles = {};
+    for (const [id, e] of Object.entries(idx.entries||{})) {
+      if (e.title) titles[e.title] = { id, name: e.name, importPath: e.importPath };
+    }
+    require('fs').writeFileSync('/tmp/sb_titles.json', JSON.stringify(titles, null, 2));
+  "
+
+  # assets/ 폴더에서 컴포넌트별 JS 파일 매핑 구성
+  # 파일명 패턴: <ComponentName>-<hash>.js
+  # 예: Button-DfetVkf1.js → Button
+  # → TITLE_TO_JS 연상배열에 저장
+fi
+```
+
+**증분 갱신**:
+기존 `.claude/skills/ehr-design-guide/MANIFEST.json`이 있으면 `generated_at`을 비교해서
+일치하면 Step 2-K 이후 디자인 가이드 관련 생성(Step 3-F) 전체를 스킵한다.
+
+```bash
+MANIFEST=".claude/skills/ehr-design-guide/MANIFEST.json"
+if [ -f "$MANIFEST" ]; then
+  OLD_GEN=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$MANIFEST','utf8')).generated_at)")
+  if [ "$OLD_GEN" = "$SB_GENERATED_AT" ]; then
+    SKIP_DESIGN_GUIDE=true
+    echo "디자인 가이드 변경 없음 → 재추출 스킵"
+  fi
+fi
+```
 
 ---
 
@@ -402,7 +714,12 @@ fi
 
 ```
 # .agents/skills/ ← .claude/skills/ 전체 복사
-for skill in ehr-screen-builder ehr-codebase-navigator ehr-procedure-tracer ehr-db-query ehr-domain-knowledge; do
+SKILLS_TO_COPY="ehr-screen-builder ehr-codebase-navigator ehr-procedure-tracer ehr-db-query ehr-domain-knowledge"
+# 디자인 가이드 스킬이 생성됐다면 함께 복사
+if [ "$DESIGN_GUIDE" = "true" ]; then
+  SKILLS_TO_COPY="$SKILLS_TO_COPY ehr-design-guide"
+fi
+for skill in $SKILLS_TO_COPY; do
   Read: .claude/skills/$skill/SKILL.md
   Write: .agents/skills/$skill/SKILL.md
 done
@@ -418,7 +735,127 @@ Write: GEMINI.md
 @./.agents/skills/ehr-screen-builder/SKILL.md
 @./.agents/skills/ehr-procedure-tracer/SKILL.md
 @./.agents/skills/ehr-db-query/SKILL.md
+# 디자인 가이드 있으면 추가
+if [ "$DESIGN_GUIDE" = "true" ]; then
+  추가 라인: @./.agents/skills/ehr-design-guide/SKILL.md
+fi
 ```
+
+### 3-F. 디자인 가이드 스킬 생성 (조건부)
+
+`DESIGN_GUIDE=false`면 이 단계 전체 스킵.
+`SKIP_DESIGN_GUIDE=true`(증분 갱신, Step 2-K 참고)면 이 단계 스킵.
+
+#### 3-F-1. SKILL.md 생성 (skel 치환)
+
+```
+Read: $PLUGIN_ROOT/profiles/$PROFILE/skills/design-guide/SKILL.md.skel
+치환:
+  {{STORYBOOK_PATH}}     → $SB_PATH
+  {{STORYBOOK_VERSION}}  → $SB_VERSION
+  {{TOTAL_TITLES}}       → 46 (또는 실측)
+  {{PRE_EXTRACT_LIST}}   → "00-Introduction, 01-Naming-Rules, 02-Legacy-JSP-Migration, 03-Quick-Reference, Button, Chip, FormSelect, FormSelect2, Table, Text"
+Write: .claude/skills/ehr-design-guide/SKILL.md
+```
+
+#### 3-F-2. INDEX.md 생성 (46개 카탈로그)
+
+`/tmp/sb_titles.json`을 카테고리별로 정리한 마크다운 테이블로 출력.
+
+```markdown
+# IDS Design System — 컴포넌트 카탈로그
+
+## 00-guides/ (디자인 시스템 가이드)
+
+| 이름 | ID | JS 파일 |
+|---|---|---|
+| Introduction | 00-guides-00-introduction--docs | assets/00-Introduction-*.js |
+| Naming-Rules | 00-guides-01-naming-rules--docs | assets/01-Naming-Rules-*.js |
+| ... | | |
+
+## 01-atoms/
+
+...
+
+## 02-modules/
+
+...
+
+## 03-pages/
+
+...
+
+## 04-utilities/
+
+...
+
+## 05-modal/
+
+...
+```
+
+```
+Write: .claude/skills/ehr-design-guide/references/INDEX.md
+```
+
+#### 3-F-3. MANIFEST.json 생성
+
+```bash
+node -e "
+  const manifest = {
+    schema_version: 1,
+    storybook_path: '$SB_PATH',
+    generated_at: $SB_GENERATED_AT,
+    storybook_version: '$SB_VERSION',
+    extracted_at: new Date().toISOString(),
+    pre_extracted: [
+      '00-Introduction', '01-Naming-Rules', '02-Legacy-JSP-Migration',
+      '03-Quick-Reference', 'Button', 'Chip', 'FormSelect',
+      'FormSelect2', 'Table', 'Text'
+    ],
+    title_to_js: <TITLE_TO_JS 매핑 객체>
+  };
+  require('fs').writeFileSync(
+    '.claude/skills/ehr-design-guide/MANIFEST.json',
+    JSON.stringify(manifest, null, 2)
+  );
+"
+```
+
+#### 3-F-4. 핵심 10개 사전 추출 (Claude inline)
+
+각 컴포넌트마다 다음을 수행:
+
+```
+Read: $SB_PATH/<JS 파일 경로>
+→ JSX 함수 호출 패턴(n.jsx/n.jsxs)을 마크다운으로 변환
+  (변환 규칙은 design-guide SKILL.md의 "JSX → Markdown 변환 규칙" 섹션 참고)
+Write: .claude/skills/ehr-design-guide/references/<name>.md
+```
+
+추출 대상:
+
+| 대상 | JS 파일 (예시) |
+|---|---|
+| 00-Introduction | assets/00-Introduction-*.js |
+| 01-Naming-Rules | assets/01-Naming-Rules-*.js |
+| 02-Legacy-JSP-Migration | assets/02-Legacy-JSP-Migration-*.js |
+| 03-Quick-Reference | assets/03-Quick Reference-*.js |
+| Button | assets/Button-*.js |
+| Chip | assets/Chip-*.js |
+| FormSelect | assets/FormSelect-*.js (또는 Select 계열) |
+| FormSelect2 | assets/Select2-*.js |
+| Table | assets/Table-*.js |
+| Text | assets/Text-*.js |
+
+> **주의**: 빌드 해시(`-BYnc9ous` 등)는 빌드마다 바뀌므로 `assets/Button-*.js`
+> 같은 glob 패턴으로 파일을 찾는다. 같은 이름의 JS가 여러 개면 가장 최신
+> mtime의 파일을 선택한다.
+
+> **추출 방식**: 별도 파서 스크립트를 만들지 **않는다**. Claude가 직접
+> JS 파일을 Read 도구로 읽고, 패턴 인식으로 마크다운 변환을 수행한다.
+> 이유: 정규식은 중첩/한글/이스케이프 처리가 불안정하고, LLM이 패턴
+> 인식만으로 더 안정적으로 처리한다.
 
 ---
 
@@ -458,20 +895,47 @@ AGENTS.md의 모듈 목록 vs 실제 디렉토리 목록 비교.
   NOT_FOUND: TRG_TIM_405 — 확인 필요
 ```
 
-### 4-D. DB 연결 상태
+### 4-D. DB 모드 상태
+
+Step 2-J 결과에 따라 다르게 보고:
 
 ```
-DB 연결 성공 시:
-  "DB 연결 성공. 총 287개 프로시저, 45개 트리거 등록."
+DB_MODE=direct (DB 연결 성공):
+  "✓ DB 연결 성공. 총 287개 프로시저, 45개 트리거 등록."
 
-DB 연결 불가 시:
-  "⚠ DB 연결 불가. 코드 기반 프로시저 목록만 등록됨.
-   DB 연결 후 다음 명령으로 전체 목록을 갱신하세요:
-   ehr-db-query 스킬 → SELECT OBJECT_NAME, OBJECT_TYPE FROM USER_OBJECTS
-   WHERE OBJECT_TYPE IN ('PROCEDURE','TRIGGER','PACKAGE','FUNCTION')"
+DB_MODE=dump (덤프 폴더 사용):
+  "✓ DUMP 모드 활성화
+   덤프 폴더: C:/EHR_PROJECT/db_dump/
+   형태: F2 (서브폴더별)
+   총 파일: 487개 (테이블 234, 프로시저 156, 패키지 12, 함수 45, 트리거 40)
+   procedure-tracer / db-query 스킬이 이 폴더를 참조합니다."
+
+DB_MODE=code-only:
+  "⚠ 코드 grep 모드
+   프로시저/트리거 내부 로직은 확인할 수 없습니다.
+   DB 연결 또는 DDL 덤프 폴더가 확보되면 /ehr-harness 다시 실행하여 갱신하세요."
 ```
 
-### 4-E. 최종 보고
+### 4-E. 디자인 가이드 상태
+
+```
+DESIGN_GUIDE=true (새로 생성):
+  "✓ ehr-design-guide 스킬 생성 완료
+   Storybook: {{SB_PATH}}
+   버전: {{SB_VERSION}}
+   사전 추출: 10개 (00-guides 4 + atoms 6)
+   JIT 대상: 36개 (modules/layouts/utilities/modal)
+   screen-builder가 화면 생성 시 자동 참조합니다."
+
+DESIGN_GUIDE=true + SKIP_DESIGN_GUIDE=true (재실행 시 변경 없음):
+  "· 디자인 가이드 변경 없음 (generated_at 일치) → 재추출 스킵"
+
+DESIGN_GUIDE=false:
+  "· Storybook 미발견 (src/main/resources/static/guide/storybook-static/ 없음)
+   → ehr-design-guide 스킬은 생성되지 않았습니다."
+```
+
+### 4-F. 최종 보고
 
 ```markdown
 ## 하네스 생성 완료
@@ -481,22 +945,26 @@ DB 연결 불가 시:
 | EHR 버전 | {{PROFILE}} |
 | 시스템명 | {{SYSTEM_NAME}} |
 | 모듈 수 | X개 |
-| 스킬 | 5개 |
+| 스킬 | 5~6개 (디자인 가이드 존재 시 6) |
 | 에이전트 | 2~3개 |
 | 프로시저 | X개 등록 |
 | 트리거 | X개 등록 |
 | 치명 프로시저 | X/6개 확인 |
-| DB 연결 | 성공/불가 |
+| DB 모드 | direct/dump/code-only |
+| 디자인 가이드 | 생성됨 / 변경 없음 / 미발견 |
 
 ### 사용 시작
 - 화면 생성: "휴가 신청 화면 만들어줘"
 - 프로시저 분석: "P_CPN_CAL_PAY_MAIN 분석해줘"
 - 코드 탐색: "인사 마스터 컨트롤러 어디에 있어?"
 - DB 조회: "THRM100 테이블 구조 알려줘"
+- IDS 컴포넌트: "Button 어떻게 써?" (디자인 가이드 있을 때만)
 
 ### 주의사항
-- DB 연결 불가 시, 프로시저/트리거 목록이 불완전합니다
-- NOT_FOUND 치명 요소는 수동 확인이 필요합니다
+- DB_MODE=code-only 시, 프로시저/트리거 내부 로직은 확인 불가
+- DB_MODE=dump 시, 덤프 버전과 운영 DB가 다를 수 있음
+- NOT_FOUND 치명 요소는 수동 확인이 필요
+- Storybook이 재빌드되면 `/ehr-harness` 다시 실행해서 디자인 가이드 갱신 권장
 ```
 
 ---
