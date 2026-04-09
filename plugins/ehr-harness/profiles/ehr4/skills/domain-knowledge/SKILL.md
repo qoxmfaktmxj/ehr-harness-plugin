@@ -1,5 +1,5 @@
 ---
-name: domain-knowledge
+name: ehr-domain-knowledge
 description: "EHR4 도메인 지식 레퍼런스. 4축 권한 모델, 법칙 A/B/C/D 판정, 화면 패턴 카탈로그(Family A~F), B1~B6 경계 검증, APPL_STATUS_CD 상태 권한, IBSheet 계약, 재구현 금지 컴포넌트, 배치 저장 규칙, Anyframe Velocity 문법."
 ---
 

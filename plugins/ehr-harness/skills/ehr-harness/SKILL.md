@@ -339,46 +339,46 @@ Write: README.md
 ### 3-C. 스킬 (skills/ + 실측값 → .claude/skills/)
 
 ```
-# domain-knowledge — 고정 복사 (프로파일 고유 EHR DNA)
+# ehr-domain-knowledge — 고정 복사 (프로파일 고유 EHR DNA)
 Read: $PLUGIN_ROOT/profiles/$PROFILE/skills/domain-knowledge/SKILL.md
-Write: .claude/skills/domain-knowledge/SKILL.md
+Write: .claude/skills/ehr-domain-knowledge/SKILL.md
 ※ 수치만 업데이트: 법칙별 JSP 수, 컴포넌트 참조 수를 실측값으로 교체
 ```
 
 ```
-# screen-builder — 스켈레톤 + 코드 예시
+# ehr-screen-builder — 스켈레톤 + 코드 예시
 Read: $PLUGIN_ROOT/profiles/$PROFILE/skills/screen-builder/SKILL.md.skel
 치환:
   {{CODE_EXAMPLES}} → Step 2-I 추출 패턴
   grep 경로를 프로젝트 실제 경로로 교체
-Write: .claude/skills/screen-builder/SKILL.md
+Write: .claude/skills/ehr-screen-builder/SKILL.md
 ```
 
 ```
-# codebase-navigator — 스켈레톤 + 모듈 맵
+# ehr-codebase-navigator — 스켈레톤 + 모듈 맵
 Read: $PLUGIN_ROOT/profiles/$PROFILE/skills/codebase-navigator/SKILL.md.skel
 치환:
   {{MODULE_MAP}} → Step 2-B 수집 결과 (키워드 포함)
   {{COMPONENT_REFS}} → Step 2-F 참조 수
-Write: .claude/skills/codebase-navigator/SKILL.md
+Write: .claude/skills/ehr-codebase-navigator/SKILL.md
 ```
 
 ```
-# procedure-tracer — 스켈레톤 + 프로시저/트리거 목록
+# ehr-procedure-tracer — 스켈레톤 + 프로시저/트리거 목록
 Read: $PLUGIN_ROOT/profiles/$PROFILE/skills/procedure-tracer/SKILL.md.skel
 치환:
   {{PROC_LIST}} → Step 2-H 전체 프로시저 목록
   {{TRIGGER_LIST}} → Step 2-H 전체 트리거 목록 (또는 DB 미연결 경고)
   {{CRITICAL_PROC}} → Step 2-G 치명 레지스트리
-Write: .claude/skills/procedure-tracer/SKILL.md
+Write: .claude/skills/ehr-procedure-tracer/SKILL.md
 ```
 
 ```
-# db-query — 스켈레톤 + DB 접속 정보
+# ehr-db-query — 스켈레톤 + DB 접속 정보
 Read: $PLUGIN_ROOT/profiles/$PROFILE/skills/db-query/SKILL.md.skel
 치환:
   {{DB_CONNECTION}} → Step 2-J 탐지 결과 (또는 미발견 경고)
-Write: .claude/skills/db-query/SKILL.md
+Write: .claude/skills/ehr-db-query/SKILL.md
 ```
 
 ### 3-D. 에이전트 (agents/ → .claude/agents/)
@@ -402,7 +402,7 @@ fi
 
 ```
 # .agents/skills/ ← .claude/skills/ 전체 복사
-for skill in screen-builder codebase-navigator procedure-tracer db-query domain-knowledge; do
+for skill in ehr-screen-builder ehr-codebase-navigator ehr-procedure-tracer ehr-db-query ehr-domain-knowledge; do
   Read: .claude/skills/$skill/SKILL.md
   Write: .agents/skills/$skill/SKILL.md
 done
@@ -413,11 +413,11 @@ done
 Write: GEMINI.md
 내용:
 @./AGENTS.md
-@./.agents/skills/domain-knowledge/SKILL.md
-@./.agents/skills/codebase-navigator/SKILL.md
-@./.agents/skills/screen-builder/SKILL.md
-@./.agents/skills/procedure-tracer/SKILL.md
-@./.agents/skills/db-query/SKILL.md
+@./.agents/skills/ehr-domain-knowledge/SKILL.md
+@./.agents/skills/ehr-codebase-navigator/SKILL.md
+@./.agents/skills/ehr-screen-builder/SKILL.md
+@./.agents/skills/ehr-procedure-tracer/SKILL.md
+@./.agents/skills/ehr-db-query/SKILL.md
 ```
 
 ---
@@ -467,7 +467,7 @@ DB 연결 성공 시:
 DB 연결 불가 시:
   "⚠ DB 연결 불가. 코드 기반 프로시저 목록만 등록됨.
    DB 연결 후 다음 명령으로 전체 목록을 갱신하세요:
-   db-query 스킬 → SELECT OBJECT_NAME, OBJECT_TYPE FROM USER_OBJECTS
+   ehr-db-query 스킬 → SELECT OBJECT_NAME, OBJECT_TYPE FROM USER_OBJECTS
    WHERE OBJECT_TYPE IN ('PROCEDURE','TRIGGER','PACKAGE','FUNCTION')"
 ```
 

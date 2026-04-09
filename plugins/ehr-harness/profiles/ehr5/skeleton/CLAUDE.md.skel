@@ -12,17 +12,17 @@ Spring Boot 2.7.18 + MyBatis 3 + Java 8 + JSP + jQuery + IBSheet7 + Oracle.
 
 | 사용자 요청 | 사용 스킬/에이전트 |
 |------------|------------------|
-| "화면 만들어", "신규 개발", "CRUD 추가" | `screen-builder` **에이전트** 스폰 |
-| "프로시저 분석해", "급여 로직", "체인 추적", "동적 SQL" | `procedure-tracer` **에이전트** 스폰 |
-| "어디에 있어?", "찾아줘", "에러 원인", "메뉴 찾기" | `codebase-navigator` **스킬** 직접 사용 |
-| "DB 조회", "프로시저 소스", "테이블 구조", "컬럼 확인" | `db-query` **스킬** 직접 사용 |
-| "권한", "법칙", "패턴", "Family", "APPL_STATUS", "배치" | `domain-knowledge` **스킬** 직접 사용 |
+| "화면 만들어", "신규 개발", "CRUD 추가" | `ehr-screen-builder` **에이전트** 스폰 |
+| "프로시저 분석해", "급여 로직", "체인 추적", "동적 SQL" | `ehr-procedure-tracer` **에이전트** 스폰 |
+| "어디에 있어?", "찾아줘", "에러 원인", "메뉴 찾기" | `ehr-codebase-navigator` **스킬** 직접 사용 |
+| "DB 조회", "프로시저 소스", "테이블 구조", "컬럼 확인" | `ehr-db-query` **스킬** 직접 사용 |
+| "권한", "법칙", "패턴", "Family", "APPL_STATUS", "배치" | `ehr-domain-knowledge` **스킬** 직접 사용 |
 | 계획 수립, TDD, 디버깅 등 범용 워크플로우 | **Superpowers** 위임 |
 
 ## 3. 에이전트 사용 규칙
 
-- `screen-builder`: 화면 생성/주요 수정 시 스폰. 기존 화면을 복제 베이스로 자율 실행.
-- `procedure-tracer`: 프로시저 체인 분석 시 스폰. 재귀 추적하여 보고서 반환.
+- `ehr-screen-builder`: 화면 생성/주요 수정 시 스폰. 기존 화면을 복제 베이스로 자율 실행.
+- `ehr-procedure-tracer`: 프로시저 체인 분석 시 스폰. 재귀 추적하여 보고서 반환.
 - 에이전트는 각자의 스킬(`.claude/skills/`)을 참조하여 작업한다.
 
 ## 4. DB 접근 규칙
@@ -40,7 +40,7 @@ Spring Boot 2.7.18 + MyBatis 3 + Java 8 + JSP + jQuery + IBSheet7 + Oracle.
 - JSP 위치: `src/main/webapp/WEB-INF/jsp/{module}/`
 - 응답: `ModelAndView` + `jsonView` (레거시), `@RestController` (API만)
 - 에러 메시지: 한국어 ("저장 되었습니다.", "조회에 실패 하였습니다.")
-- 상세 코드 템플릿은 `screen-builder` 스킬 참조.
+- 상세 코드 템플릿은 `ehr-screen-builder` 스킬 참조.
 
 ## 6. 금지 사항
 
