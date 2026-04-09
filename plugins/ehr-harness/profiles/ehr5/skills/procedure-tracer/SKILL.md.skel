@@ -171,6 +171,53 @@ grep -rn "F_COM_GET_SQL_MAP" --include="*-sql-query.xml" src/main/resources/mapp
 
 {{CRITICAL_PROC}}
 
+#### 치명 프로시저 (고정 목록)
+
+| 프로시저 | 영역 | 위험 |
+|---------|------|------|
+| P_CPN_CAL_PAY_MAIN | 급여 | 급여 계산 메인. 8+ 직접 서브, 100+ 재귀 호출 |
+| P_CPN_CAL_PAY_MAIN 하위 전체 | 급여 | 급여 메인이 참조하는 모든 서브 프로시저 (DB에서 USER_SOURCE 조회로 확인) |
+| P_CPN_SMPPYM_EMP | 급여 | 급여 지급 대상 처리 |
+| P_CPN_ORIGIN_TAX_INS | 급여 | 원천세 산출/등록 |
+| P_HRM_POST | 인사 | 인사발령 처리 |
+| P_HRM_POST_DETAIL | 인사 | 인사발령 상세 처리 |
+| P_TIM_WORK_HOUR_CHG | 근태 | 근무시간 변경 (WORK_INFO_TEMP 함수 참조) |
+| P_HRI_AFTER_PROC_EXEC | 결재 | 신청 후처리 디스패처 (applCd별 분기) |
+| P_HRI_APP_PATH_INS_AUTO_ALL | 결재 | 결재 경로 자동 생성 |
+| P_TIM_VACATION_CLEAN | 근태 | 연차 잔여일수 재계산 |
+| P_TIM_ANNUAL_CREATE | 근태 | 연차 생성 (연간 연차일수 산출·부여) |
+
+#### 치명 프로시저 (연도별 확장 — 매년 신규 생성)
+
+| 패턴 | 영역 | 위험 |
+|------|------|------|
+| P_CPN_YEAREND_MONPAY_{YYYY} (2025~) | 급여/정산 | 연말정산 월급여 연동 |
+
+#### 치명 패키지
+
+| 패키지 | 영역 | 위험 |
+|--------|------|------|
+| PKG_CPN_SEP | 급여 | 퇴직금/퇴직연금 계산 |
+| PKG_CPN_YEA_{YYYY} (2025~) | 정산 | 연말정산 메인 패키지 (매년 생성) |
+| PKG_CPN_YEA_{YYYY}_CODE (2025~) | 정산 | 연말정산 코드 |
+| PKG_CPN_YEA_{YYYY}_DISK (2025~) | 정산 | 연말정산 디스크 제출 |
+| PKG_CPN_YEA_{YYYY}_EMP (2025~) | 정산 | 연말정산 직원 처리 |
+| PKG_CPN_YEA_{YYYY}_ERRCHK (2025~) | 정산 | 연말정산 오류 검증 |
+| PKG_CPN_YEA_{YYYY}_SYNC (2025~) | 정산 | 연말정산 동기화 |
+| PKG_CPN_PUMP_API | 급여 | 급여 펌프 API |
+
+#### 치명 함수
+
+| 함수 | 영역 | 위험 |
+|------|------|------|
+| WORK_INFO_TEMP | 근태 | 인원의 요일별 근무코드별 근무시간 산출 (P_TIM_WORK_HOUR_CHG가 참조) |
+
+#### 높음 등급 (사용자 승인 후 수정)
+
+| 프로시저 | 설명 |
+|---------|------|
+| P_BEN_PAY_DATA_CREATE | 복리후생→급여 연동 브릿지 (BIZ_CD별 분기) |
+
 ---
 
 ## 프로시저 목록

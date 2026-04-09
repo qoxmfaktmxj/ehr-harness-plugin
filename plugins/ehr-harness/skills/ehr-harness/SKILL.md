@@ -127,7 +127,10 @@ for comp in GetDataListController SaveDataController ExecPrcController \
 done
 ```
 
-### 2-G. 치명 프로시저/트리거 존재 확인
+### 2-G. 치명 프로시저/패키지/함수/트리거 존재 확인
+
+"치명" = 비즈니스 로직이 복잡하게 얽혀 있어, AI가 단독 수정 시 연쇄 장애가 발생할 수 있는 오브젝트.
+급여 계산 체인, 인사발령, 연말정산, 결재 경로 등 핵심 업무 프로시저를 포함한다.
 
 ```bash
 # 매퍼 확장자 결정
@@ -137,9 +140,11 @@ else
   MAPPER_EXT="*-mapping-query.xml"
 fi
 
-# 치명 프로시저 확인
-for proc in P_CPN_CAL_PAY_MAIN P_HRM_POST P_TIM_WORK_HOUR_CHG \
-            P_HRI_AFTER_PROC_EXEC P_TIM_VACATION_CLEAN; do
+# ── 치명 프로시저 확인 (고정 목록) ──
+for proc in P_CPN_CAL_PAY_MAIN P_CPN_SMPPYM_EMP P_CPN_ORIGIN_TAX_INS \
+            P_HRM_POST P_HRM_POST_DETAIL \
+            P_TIM_WORK_HOUR_CHG P_TIM_VACATION_CLEAN P_TIM_ANNUAL_CREATE \
+            P_HRI_AFTER_PROC_EXEC P_HRI_APP_PATH_INS_AUTO_ALL; do
   found=$(grep -rl "$proc" --include="$MAPPER_EXT" . 2>/dev/null | head -1)
   if [ -n "$found" ]; then
     echo "OK $proc → $found"
@@ -148,10 +153,33 @@ for proc in P_CPN_CAL_PAY_MAIN P_HRM_POST P_TIM_WORK_HOUR_CHG \
   fi
 done
 
-# 치명 패키지
-grep -rl "PKG_CPN_SEP" --include="$MAPPER_EXT" . 2>/dev/null | head -1
+# ── 치명 프로시저 확인 (연도별 확장 패턴) ──
+# P_CPN_YEAREND_MONPAY_YYYY (2025~): 연말정산 월급여 연동
+for year_proc in $(grep -roh "P_CPN_YEAREND_MONPAY_[0-9]*" --include="$MAPPER_EXT" . 2>/dev/null | sort -u); do
+  echo "OK (연도별) $year_proc"
+done
 
-# 치명 트리거
+# ── 치명 패키지 확인 ──
+# PKG_CPN_SEP: 퇴직금/퇴직연금
+grep -rl "PKG_CPN_SEP" --include="$MAPPER_EXT" . 2>/dev/null | head -1 && echo "OK PKG_CPN_SEP"
+
+# PKG_CPN_PUMP_API: 급여 펌프
+grep -rl "PKG_CPN_PUMP_API" --include="$MAPPER_EXT" . 2>/dev/null | head -1 && echo "OK PKG_CPN_PUMP_API"
+
+# PKG_CPN_YEA_YYYY_* (2025~): 연말정산 패키지 군
+# _CODE, _DISK, _EMP, _ERRCHK, _SYNC 등 서브 패키지 포함
+for year_pkg in $(grep -roh "PKG_CPN_YEA_[0-9]*[A-Z_]*" --include="$MAPPER_EXT" --include="*.java" --include="*.jsp" . 2>/dev/null | sort -u); do
+  year_num=$(echo "$year_pkg" | grep -oP '\d{4}')
+  if [ -n "$year_num" ] && [ "$year_num" -ge 2025 ]; then
+    echo "OK (연도별 치명패키지) $year_pkg"
+  fi
+done
+
+# ── 치명 함수 확인 ──
+# WORK_INFO_TEMP: 인원의 요일별 근무코드별 근무시간 (P_TIM_WORK_HOUR_CHG 참조)
+grep -rl "WORK_INFO_TEMP" --include="$MAPPER_EXT" --include="*.java" . 2>/dev/null | head -1 && echo "OK WORK_INFO_TEMP"
+
+# ── 치명 트리거 확인 ──
 for trg in TRG_HRI_103 TRG_TIM_405; do
   found=$(grep -rl "$trg" --include="*.java" --include="*.xml" --include="*.jsp" . 2>/dev/null | head -1)
   if [ -n "$found" ]; then
@@ -160,10 +188,20 @@ for trg in TRG_HRI_103 TRG_TIM_405; do
     echo "NOT_FOUND $trg"
   fi
 done
+
+# ── P_CPN_CAL_PAY_MAIN 하위 프로시저 탐색 (DB 연결 가능 시) ──
+# SELECT DISTINCT REGEXP_SUBSTR(TEXT, '(P_\w+|PKG_\w+)', 1, 1) AS SUB_PROC
+# FROM USER_SOURCE
+# WHERE NAME = 'P_CPN_CAL_PAY_MAIN' AND TYPE = 'PROCEDURE'
+#   AND REGEXP_LIKE(TEXT, '(P_\w+|PKG_\w+)') AND LINE > 1
+# ORDER BY 1;
+# → 결과를 모두 치명 등급으로 추가 등록
 ```
 
 → 존재 확인된 것만 `CRITICAL_PROC` 레지스트리에 등록.
 → NOT_FOUND는 경고 목록에 추가.
+→ 연도별 패턴은 `{YYYY} >= 2025` 조건으로 자동 확장.
+→ DB 연결 가능 시 P_CPN_CAL_PAY_MAIN의 서브 프로시저를 USER_SOURCE에서 추가 탐색.
 
 ### 2-H. 전체 프로시저/트리거 목록
 
