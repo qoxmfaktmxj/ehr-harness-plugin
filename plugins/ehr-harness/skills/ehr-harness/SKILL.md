@@ -98,7 +98,68 @@ echo "✓ Superpowers 플러그인 확인됨"
 ```
 
 → Superpowers 미설치 시 안내 메시지 출력 후 **즉시 종료**.
-→ 설치됨 확인 후 Step 1로 진입.
+→ 설치됨 확인 후 Step 0.7로 진입.
+
+---
+
+## Step 0.7: 기존 하네스 감지
+
+이 단계는 "이미 하네스가 깔려 있는 프로젝트에 다시 실행됐는가" 를 판정한다.
+세 가지 진입 모드 중 하나를 결정하고 그 결과를 `HARNESS_MODE` 변수에 저장한다.
+
+- `fresh` — 하네스 흔적이 전혀 없음. 기존 흐름(Step 1 → Step 4)을 그대로 따라감.
+- `legacy` — `AGENTS.md` 같은 하네스 산출물은 있는데 `.claude/HARNESS.json` 이 없음.
+- `stamped` — `.claude/HARNESS.json` 이 있고 schema_version 이 채워져 있음.
+
+```bash
+# lib/harness-state.sh 가져오기
+source "$PLUGIN_ROOT/skills/ehr-harness/lib/harness-state.sh"
+
+MANIFEST=".claude/HARNESS.json"
+
+# 하네스 산출물 흔적 — AGENTS.md + .claude/skills/ehr-* 중 하나라도 있으면 "있음"
+HAS_HARNESS_TRACE=0
+if [ -f "AGENTS.md" ] || ls .claude/skills/ehr-* >/dev/null 2>&1; then
+  HAS_HARNESS_TRACE=1
+fi
+
+if [ ! -f "$MANIFEST" ] && [ "$HAS_HARNESS_TRACE" = "0" ]; then
+  HARNESS_MODE="fresh"
+elif [ ! -f "$MANIFEST" ] && [ "$HAS_HARNESS_TRACE" = "1" ]; then
+  HARNESS_MODE="legacy"
+elif hs_is_legacy "$MANIFEST"; then
+  # 매니페스트 파일은 있으나 schema_version 없음 → legacy 와 동일 취급
+  HARNESS_MODE="legacy"
+else
+  HARNESS_MODE="stamped"
+fi
+
+echo "HARNESS_MODE=$HARNESS_MODE"
+```
+
+→ `fresh` 면 Step 1 로 진행한다 (기존 흐름).
+→ `legacy` 면 Step 0.7-A (legacy adopt) 로 분기한다.
+→ `stamped` 면 Step 0.7-B (업데이트 모드) 로 분기한다.
+
+### Step 0.7-A: legacy adopt 분기
+
+`AskUserQuestion` 으로 다음을 묻는다.
+
+```
+질문: "기존 하네스 흔적이 감지됐는데 버전 스탬프(.claude/HARNESS.json)가 없습니다. 어떻게 할까요?"
+헤더: "하네스 모드"
+  - 1: "현 상태 인정 (adopt)" — 파일은 그대로 두고 스탬프만 새로 부여. 다음 실행부터 정상 업데이트 가능.
+  - 2: "전체 재생성" — 기존 동작. 모든 파일을 새로 덮어씀.
+  - 3: "취소" — 아무것도 안 함.
+```
+
+- 응답이 1이면 → `LEGACY_ADOPT=1` 로 설정하고 Step 1 로 진행하되, **Step 3 의 모든 Write 를 스킵**하고 Step 4-G 에서 매니페스트만 새로 작성한다.
+- 응답이 2이면 → 기존 흐름. Step 1 → Step 4 진행 (`HARNESS_MODE=fresh` 와 동일하게 동작).
+- 응답이 3이면 → 즉시 종료.
+
+### Step 0.7-B: 업데이트 모드 분기
+
+`stamped` 인 경우, Step 1 ~ Step 2 를 정상적으로 수행한 뒤 (모듈 맵/치명 프로시저 등 분석 결과는 항상 최신화 필요), **Step 3 직전에 diff 를 계산하고 사용자 확인을 받는다**. 자세한 절차는 Step 3-PRE 에서 정의한다.
 
 ---
 
@@ -599,7 +660,249 @@ fi
 
 ---
 
+## Step 3-PRE: 소스/출력 매핑과 diff 계산
+
+이 단계의 1번(SOURCE_MAP 빌드)은 모든 모드에서 실행한다 (Step 4-G 가 매니페스트를 쓸 때 필요).
+2~6번(bucket 분류 + 사용자 확인) 은 `HARNESS_MODE=stamped` 일 때만 실행한다.
+
+### 3-PRE-1. SOURCE_MAP 빌드
+
+모든 출력 파일을 [source_key | source_abs | output_key | output_abs] 4-튜플로 등록한다.
+
+```bash
+build_source_map() {
+  SOURCE_MAP=""
+  add() {
+    SOURCE_MAP="$SOURCE_MAP
+$1|$2|$3|$4"
+  }
+
+  # 인프라 (shared/)
+  add "profiles/shared/settings.json"         "$PLUGIN_ROOT/profiles/shared/settings.json"         ".claude/settings.json"        ".claude/settings.json"
+  add "profiles/shared/hooks/db-read-only.sh" "$PLUGIN_ROOT/profiles/shared/hooks/db-read-only.sh" ".claude/hooks/db-read-only.sh" ".claude/hooks/db-read-only.sh"
+  add "profiles/shared/.codex/config.toml"    "$PLUGIN_ROOT/profiles/shared/.codex/config.toml"    ".codex/config.toml"           ".codex/config.toml"
+
+  # 문서 (skel 기반)
+  add "profiles/$PROFILE/skeleton/AGENTS.md.skel" "$PLUGIN_ROOT/profiles/$PROFILE/skeleton/AGENTS.md.skel" "AGENTS.md" "AGENTS.md"
+  add "profiles/$PROFILE/skeleton/CLAUDE.md.skel" "$PLUGIN_ROOT/profiles/$PROFILE/skeleton/CLAUDE.md.skel" "CLAUDE.md" "CLAUDE.md"
+  add "profiles/$PROFILE/skeleton/README.md.skel" "$PLUGIN_ROOT/profiles/$PROFILE/skeleton/README.md.skel" "README.md" "README.md"
+
+  # 스킬 (5개 + 디자인 가이드)
+  for s in domain-knowledge screen-builder codebase-navigator procedure-tracer db-query; do
+    src_dir="$PLUGIN_ROOT/profiles/$PROFILE/skills/$s"
+    if [ -f "$src_dir/SKILL.md.skel" ]; then
+      src_file="$src_dir/SKILL.md.skel"
+      src_key="profiles/$PROFILE/skills/$s/SKILL.md.skel"
+    else
+      src_file="$src_dir/SKILL.md"
+      src_key="profiles/$PROFILE/skills/$s/SKILL.md"
+    fi
+    add "$src_key" "$src_file" ".claude/skills/ehr-$s/SKILL.md" ".claude/skills/ehr-$s/SKILL.md"
+  done
+
+  if [ "$DESIGN_GUIDE" = "true" ]; then
+    add "profiles/$PROFILE/skills/design-guide/SKILL.md.skel" \
+        "$PLUGIN_ROOT/profiles/$PROFILE/skills/design-guide/SKILL.md.skel" \
+        ".claude/skills/ehr-design-guide/SKILL.md" \
+        ".claude/skills/ehr-design-guide/SKILL.md"
+  fi
+
+  # 에이전트
+  add "profiles/$PROFILE/agents/screen-builder.md"   "$PLUGIN_ROOT/profiles/$PROFILE/agents/screen-builder.md"   ".claude/agents/screen-builder.md"   ".claude/agents/screen-builder.md"
+  add "profiles/$PROFILE/agents/procedure-tracer.md" "$PLUGIN_ROOT/profiles/$PROFILE/agents/procedure-tracer.md" ".claude/agents/procedure-tracer.md" ".claude/agents/procedure-tracer.md"
+  if [ "$PROFILE" = "ehr4" ]; then
+    add "profiles/$PROFILE/agents/release-reviewer.md" "$PLUGIN_ROOT/profiles/$PROFILE/agents/release-reviewer.md" ".claude/agents/release-reviewer.md" ".claude/agents/release-reviewer.md"
+  fi
+}
+
+build_source_map
+```
+
+### 3-PRE-2. 프로파일 변경 감지 (stamped 모드)
+
+```bash
+if [ "$HARNESS_MODE" = "stamped" ]; then
+  STORED_PROFILE=$(hs_get_profile "$MANIFEST")
+  if [ -n "$STORED_PROFILE" ] && [ "$STORED_PROFILE" != "$PROFILE" ]; then
+    echo "⚠ 프로파일 변경 감지: $STORED_PROFILE → $PROFILE"
+    echo "프로파일이 바뀌면 거의 모든 파일이 충돌합니다. 전체 재생성을 권장합니다."
+    # AskUserQuestion 으로 [전체 재생성 / 취소] 만 제시
+    # 응답이 전체 재생성이면 HARNESS_MODE=fresh 로 강등하고 Step 3 진입
+  fi
+fi
+```
+
+### 3-PRE-3. bucket 분류 (stamped 모드)
+
+```bash
+if [ "$HARNESS_MODE" = "stamped" ]; then
+  UNCHANGED=""
+  SAFE_UPDATES=""
+  USER_ONLY=""
+  CONFLICTS=""
+  NEW_FILES=""
+
+  while IFS='|' read -r skey sabs okey oabs; do
+    [ -z "$skey" ] && continue
+    bucket=$(hs_classify_file "$MANIFEST" "$skey" "$sabs" "$okey" "$oabs")
+    case "$bucket" in
+      unchanged)   UNCHANGED="$UNCHANGED $okey" ;;
+      safe-update) SAFE_UPDATES="$SAFE_UPDATES $okey" ;;
+      user-only)   USER_ONLY="$USER_ONLY $okey" ;;
+      conflict)    CONFLICTS="$CONFLICTS $okey" ;;
+      new)         NEW_FILES="$NEW_FILES $okey" ;;
+    esac
+  done <<< "$SOURCE_MAP"
+fi
+```
+
+이 단계가 끝나면 5개 리스트(`UNCHANGED`, `SAFE_UPDATES`, `USER_ONLY`, `CONFLICTS`, `NEW_FILES`)가 채워진다.
+다음 단계(3-PRE-4)에서 사용자에게 요약을 보여주고 진행 여부를 묻는다.
+
+### 3-PRE-4. 사용자 확인 1차 (stamped 모드)
+
+요약을 출력하고 `AskUserQuestion` 을 1회 호출한다.
+
+```
+=== 하네스 업데이트 미리보기 ===
+플러그인:    ehr-harness {{STORED_VERSION}} → {{PLUGIN_VERSION}}
+프로파일:    {{PROFILE}}
+변경 없음:   {{N_UNCHANGED}} 개
+안전 업데이트: {{N_SAFE}} 개
+사용자 편집(유지): {{N_USER}} 개
+충돌:        {{N_CONFLICT}} 개
+새 파일:     {{N_NEW}} 개
+================================
+
+[안전 업데이트 목록]
+{{SAFE_UPDATES_LIST}}
+
+[충돌 목록]
+{{CONFLICTS_LIST}}
+
+[사용자 편집(유지)]
+{{USER_ONLY_LIST}}
+```
+
+```
+질문: "어떻게 진행할까요?"
+헤더: "업데이트 모드"
+  - 1: "안전 업데이트만 적용 (충돌은 그대로)" — 안전 + 새 파일만 쓴다. 사용자 편집/충돌은 손대지 않음.
+  - 2: "안전 업데이트 + 충돌 개별 결정" — 충돌 항목마다 따로 묻는다 (3-PRE-5).
+  - 3: "전체 재생성 (모든 파일 덮어쓰기)" — 사용자 편집까지 다 날아감. 위험.
+  - 4: "취소" — 아무것도 안 함.
+```
+
+선택 결과를 `UPDATE_STRATEGY` 에 저장한다.
+
+### 3-PRE-5. 충돌 항목 개별 결정 (UPDATE_STRATEGY=2 일 때만)
+
+`CONFLICTS` 의 각 파일에 대해 `AskUserQuestion` 을 호출한다.
+
+```
+질문: "{{path}} 가 플러그인에서도 바뀌었고 사용자도 편집했습니다. 어떻게 할까요?"
+헤더: "충돌 해결"
+  - 1: "백업 후 덮어쓰기" — 현재 파일을 <path>.bak.YYYYMMDD-HHMMSS 로 저장한 뒤 새 버전을 쓴다.
+  - 2: "그대로 둠" — 사용자 편집을 보존한다. 매니페스트에는 현재 파일의 sha 를 기록.
+  - 3: "강제 덮어쓰기 (백업 없음)" — 사용자 편집을 버린다.
+```
+
+각 파일의 결정을 `CONFLICT_DECISION[<path>]` 연상배열에 저장한다.
+
+값 종류: `backup` | `keep` | `force`
+
+### 3-PRE-6. 실행 계획 확정
+
+| UPDATE_STRATEGY | 동작 |
+|---|---|
+| 1 | `safe-update` + `new` 만 Write. `conflict` 는 모두 "그대로 둠" 처리 (`CONFLICT_DECISION` 모두 `keep`). |
+| 2 | `safe-update` + `new` 는 Write. `conflict` 는 `CONFLICT_DECISION` 에 따라 분기. |
+| 3 | 모든 파일 Write (= fresh 모드와 동일). `HARNESS_MODE=fresh` 로 강등. |
+| 4 | 즉시 종료. Step 4 도 4-G 도 실행하지 않음. |
+
+이 단계가 끝나면 `WRITE_LIST` (Write 할 파일들의 output_key 목록, 공백 구분) 와
+`SKIP_LIST` (Write 하지 않을 파일들의 목록) 가 확정된다. Step 3 은 이 두 리스트를 기준으로 동작한다.
+
+```bash
+# WRITE_LIST 빌드 예시 (UPDATE_STRATEGY=2)
+WRITE_LIST=""
+for f in $SAFE_UPDATES $NEW_FILES; do
+  WRITE_LIST="$WRITE_LIST $f"
+done
+# UNCHANGED 와 USER_ONLY 는 항상 SKIP
+# CONFLICTS 는 CONFLICT_DECISION 으로 분기
+for f in $CONFLICTS; do
+  case "${CONFLICT_DECISION[$f]:-keep}" in
+    backup|force) WRITE_LIST="$WRITE_LIST $f" ;;
+    keep) ;;  # SKIP
+  esac
+done
+```
+
+---
+
 ## Step 3: 파일 생성
+
+> **legacy adopt 가드:** `LEGACY_ADOPT=1` 이면 이 Step 3 전체를 스킵한다.
+> 이유: 현재 파일을 그대로 인정하는 모드이므로 Write 작업이 일어나면 안 된다.
+> Step 4-G 에서 현재 파일들의 sha 만 매니페스트에 기록한다.
+>
+> ```bash
+> if [ "${LEGACY_ADOPT:-0}" = "1" ]; then
+>   echo "· legacy adopt 모드 — Step 3 전체 스킵"
+>   # build_source_map 은 Step 3-PRE-1 에서 이미 호출됨
+>   # Step 4 로 넘어감
+> fi
+> ```
+>
+> **Selective Write 가드 (stamped 모드 전용):**
+>
+> `HARNESS_MODE=stamped` 일 때, Step 3 의 모든 Write 는 다음 헬퍼를 통과해야 한다.
+>
+> ```bash
+> should_write() {
+>   local output_key="$1"
+>   # fresh 모드면 무조건 씀
+>   if [ "$HARNESS_MODE" = "fresh" ]; then
+>     return 0
+>   fi
+>   # legacy adopt 모드면 안 씀 (Step 3 자체가 스킵되지만 안전망)
+>   if [ "${LEGACY_ADOPT:-0}" = "1" ]; then
+>     return 1
+>   fi
+>   # stamped 모드면 WRITE_LIST 검사
+>   case " $WRITE_LIST " in
+>     *" $output_key "*) return 0 ;;
+>     *) return 1 ;;
+>   esac
+> }
+>
+> backup_if_needed() {
+>   local path="$1"
+>   local decision="${CONFLICT_DECISION[$path]:-}"
+>   if [ "$decision" = "backup" ] && [ -f "$path" ]; then
+>     local stamp
+>     stamp=$(date +%Y%m%d-%H%M%S)
+>     cp "$path" "$path.bak.$stamp"
+>     echo "  · 백업: $path → $path.bak.$stamp"
+>   fi
+> }
+> ```
+>
+> Step 3 의 모든 Write 블록은 다음 패턴을 따른다:
+>
+> ```bash
+> if should_write ".claude/settings.json"; then
+>   backup_if_needed ".claude/settings.json"
+>   # Read + Write 본문
+> fi
+> ```
+>
+> `should_write` 가 false 를 반환하면 해당 Write 는 통째로 스킵된다.
+> 분석 단계(Step 2) 는 항상 수행되며, Write 만 선택적으로 일어난다.
+>
+> 아래 3-A ~ 3-F 의 모든 Write 는 위 가드 패턴을 적용한다고 가정한다.
+> (마크다운 가독성을 위해 각 블록에 일일이 if 문을 풀어 쓰지 않는다.)
 
 ### 3-A. 인프라 파일 (shared/ → 프로젝트 루트)
 
@@ -937,11 +1240,38 @@ DESIGN_GUIDE=false:
 
 ### 4-F. 최종 보고
 
+**모드 표시:** 아래 보고의 첫 줄에 다음을 출력한다.
+
+```
+HARNESS_MODE: {{HARNESS_MODE}}
+```
+
+- `fresh` → "신규 생성"
+- `legacy` (adopt 선택) → "기존 하네스 인정 (스탬프만 부여)"
+- `stamped` → "업데이트"
+
+**stamped 모드의 변경 요약:** `HARNESS_MODE=stamped` 일 때만 Step 3 결과를 추가로 보고한다.
+
+```
+적용 결과:
+  안전 업데이트: {{N_SAFE_APPLIED}} 개
+  새 파일:       {{N_NEW_APPLIED}} 개
+  충돌 해결:
+    - 백업 후 덮어쓰기: {{N_CONF_BACKUP}} 개
+    - 그대로 둠:        {{N_CONF_KEEP}} 개
+    - 강제 덮어쓰기:    {{N_CONF_FORCE}} 개
+  사용자 편집(유지): {{N_USER_ONLY}} 개
+  변경 없음:        {{N_UNCHANGED}} 개
+```
+
+각 카운터는 Step 3-PRE-4/5/6 에서 결정된 후 Step 3 실행 중에 누적해서 갱신한다.
+
 ```markdown
 ## 하네스 생성 완료
 
 | 항목 | 값 |
 |------|-----|
+| 모드 | {{HARNESS_MODE}} |
 | EHR 버전 | {{PROFILE}} |
 | 시스템명 | {{SYSTEM_NAME}} |
 | 모듈 수 | X개 |
@@ -952,6 +1282,7 @@ DESIGN_GUIDE=false:
 | 치명 프로시저 | X/6개 확인 |
 | DB 모드 | direct/dump/code-only |
 | 디자인 가이드 | 생성됨 / 변경 없음 / 미발견 |
+| 플러그인 버전 | {{PLUGIN_VERSION}} |
 
 ### 사용 시작
 - 화면 생성: "휴가 신청 화면 만들어줘"
@@ -965,7 +1296,58 @@ DESIGN_GUIDE=false:
 - DB_MODE=dump 시, 덤프 버전과 운영 DB가 다를 수 있음
 - NOT_FOUND 치명 요소는 수동 확인이 필요
 - Storybook이 재빌드되면 `/ehr-harness` 다시 실행해서 디자인 가이드 갱신 권장
+- 플러그인이 갱신되면 `/ehr-harness` 다시 실행해서 변경분 반영 (3-bucket diff 가 자동으로 안전한 항목만 덮어씀)
 ```
+
+### 4-G. HARNESS.json 갱신 (모든 모드에서 마지막으로 수행)
+
+```bash
+source "$PLUGIN_ROOT/skills/ehr-harness/lib/harness-state.sh"
+
+# (a) 소스 매니페스트 — Step 3-PRE-1 에서 채운 SOURCE_MAP 을 그대로 사용
+# SOURCE_MAP 은 "source_key|source_abs|output_key|output_abs" 한 줄/항목
+SOURCES_JSON='{'
+OUTPUTS_JSON='{'
+first_s=1; first_o=1
+while IFS='|' read -r skey sabs okey oabs; do
+  [ -z "$skey" ] && continue
+  src_sha=$(hs_sha256 "$sabs")
+  out_sha=$(hs_sha256 "$oabs")
+  if [ -n "$src_sha" ]; then
+    if [ $first_s -eq 0 ]; then SOURCES_JSON="$SOURCES_JSON,"; fi
+    SOURCES_JSON="$SOURCES_JSON\"$skey\":\"$src_sha\""
+    first_s=0
+  fi
+  if [ -n "$out_sha" ]; then
+    if [ $first_o -eq 0 ]; then OUTPUTS_JSON="$OUTPUTS_JSON,"; fi
+    OUTPUTS_JSON="$OUTPUTS_JSON\"$okey\":\"$out_sha\""
+    first_o=0
+  fi
+done <<< "$SOURCE_MAP"
+SOURCES_JSON="$SOURCES_JSON}"
+OUTPUTS_JSON="$OUTPUTS_JSON}"
+
+PLUGIN_VERSION=$(hs_plugin_version "$PLUGIN_ROOT")
+
+# legacy adopt 모드면 generated_at 을 지금 시각으로 새로 부여
+# fresh 모드면 generated_at 도 지금 시각
+# stamped 모드면 기존 generated_at 을 보존
+GEN_AT=""
+if [ "$HARNESS_MODE" = "stamped" ] && [ -f "$MANIFEST" ]; then
+  GEN_AT=$(hs_get_generated_at "$MANIFEST")
+fi
+if [ -z "$GEN_AT" ]; then
+  GEN_AT=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)
+fi
+
+hs_write_manifest "$MANIFEST" "$PLUGIN_VERSION" "$PROFILE" "$SOURCES_JSON" "$OUTPUTS_JSON" "$GEN_AT"
+
+echo "✓ HARNESS.json 갱신: plugin_version=$PLUGIN_VERSION, profile=$PROFILE"
+```
+
+→ 이 단계는 모든 모드(fresh / legacy adopt / stamped 업데이트)의 마지막에 무조건 한 번 실행된다.
+→ legacy adopt 모드의 경우, Step 3 의 Write 를 모두 스킵했지만, 현재 디스크의 파일 sha 를 기준으로 outputs 를 채우므로 "현 상태 인정" 이 정확히 표현된다.
+→ `UPDATE_STRATEGY=4` (취소) 일 때는 Step 4 자체가 실행되지 않으므로 매니페스트도 변하지 않는다.
 
 ---
 

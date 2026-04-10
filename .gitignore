@@ -6,3 +6,7 @@ desktop.ini
 *~
 .idea/
 .vscode/
+
+# 내부 설계/계획 문서 (repo에 푸시하지 않음)
+docs/superpowers/plans/
+docs/superpowers/specs/
