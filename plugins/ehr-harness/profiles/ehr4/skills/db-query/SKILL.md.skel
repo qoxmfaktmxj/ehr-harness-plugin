@@ -30,6 +30,14 @@ echo "DB 모드: $DB_MODE"
 
 ---
 
+## DB 테이블 참조
+
+테이블명/설명으로 빠르게 찾을 때 프로젝트 루트의 `DB_MAP.md`를 Read한다.
+CLAUDE.md의 DB prefix맵으로 모듈을 특정한 후, 상세 테이블이 필요하면 DB_MAP.md 참조.
+컬럼 상세는 `db-schema/{MODULE}/tables_doc.sql` 참조.
+
+---
+
 ## Step D: DUMP 모드 — 덤프 폴더 기반 조회
 
 `DB_MODE=dump`일 때만 수행. 그 외 모드면 이 섹션 스킵.

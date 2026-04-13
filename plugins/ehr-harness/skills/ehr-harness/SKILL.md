@@ -647,6 +647,56 @@ fi
 기존 `.claude/skills/ehr-design-guide/MANIFEST.json`이 있으면 `generated_at`을 비교해서
 일치하면 Step 2-K 이후 디자인 가이드 관련 생성(Step 3-F) 전체를 스킵한다.
 
+### 2-L. 서브패키지 맵 + DB prefix 맵 생성
+
+모듈별 서브패키지 구조와 DB 테이블 prefix 규칙을 경량 맵으로 생성한다.
+이 데이터는 `{{SUBPACKAGE_MAP}}`과 `{{DB_PREFIX_MAP}}`으로 CLAUDE.md에 주입되어
+AI가 코드/DB 탐색 시 grep 횟수를 줄인다 (~540 tokens 추가).
+
+```bash
+# 서브패키지 맵: 모듈별 Java 하위 디렉토리 + Controller 수
+SUBPACKAGE_MAP=""
+for mod in $(ls $JAVA_ROOT/ 2>/dev/null); do
+  if [ -d "$JAVA_ROOT/$mod" ]; then
+    pkgs=""
+    for subdir in $(ls $JAVA_ROOT/$mod/ 2>/dev/null); do
+      if [ -d "$JAVA_ROOT/$mod/$subdir" ]; then
+        cnt=$(find "$JAVA_ROOT/$mod/$subdir" -name "*Controller.java" 2>/dev/null | wc -l)
+        if [ "$cnt" -gt 0 ]; then
+          pkgs="$pkgs $subdir($cnt)"
+        fi
+      fi
+    done
+    if [ -n "$pkgs" ]; then
+      SUBPACKAGE_MAP="$SUBPACKAGE_MAP
+$mod:$pkgs"
+    fi
+  fi
+done
+```
+
+```bash
+# DB prefix 맵: 고정값 (EHR5 기본 패키지 공통)
+DB_PREFIX_MAP="TCP→CPN(급여) THR→HRM(인사) TSY→SYS(시스템) TTI→TIM(근태) TWT→WTM(근무) TBE→BEN(복리) TOR→ORG(조직) TPA→PAP(평가) TYE→YEA(연말정산) TCD→COD(코드) TTR→TRN(교육)"
+```
+
+→ `SUBPACKAGE_MAP`과 `DB_PREFIX_MAP`은 CLAUDE.md.skel 치환에 사용된다.
+
+#### 2-L-2. CODE_MAP.md / DB_MAP.md 고정 레퍼런스 복사
+
+플러그인에 포함된 고정 레퍼런스 파일을 프로젝트 루트로 복사한다.
+이 파일들은 EHR5 기본 패키지 기준이며, 스킬에서 상세 탐색 시 참조한다.
+
+```bash
+REFERENCE_DIR="$PLUGIN_ROOT/profiles/$PROFILE/reference"
+if [ -f "$REFERENCE_DIR/CODE_MAP.md" ]; then
+  cp "$REFERENCE_DIR/CODE_MAP.md" CODE_MAP.md
+fi
+if [ -f "$REFERENCE_DIR/DB_MAP.md" ]; then
+  cp "$REFERENCE_DIR/DB_MAP.md" DB_MAP.md
+fi
+```
+
 ```bash
 MANIFEST=".claude/skills/ehr-design-guide/MANIFEST.json"
 if [ -f "$MANIFEST" ]; then
@@ -939,6 +989,8 @@ Read: $PLUGIN_ROOT/profiles/$PROFILE/skeleton/CLAUDE.md.skel
 치환:
   {{SYSTEM_NAME}} → 시스템명
   {{CRITICAL_PROC_NAMES}} → 치명 프로시저 이름 목록 (콤마 구분)
+  {{SUBPACKAGE_MAP}} → Step 2-L 서브패키지 맵 (모듈별 하위 디렉토리+화면수)
+  {{DB_PREFIX_MAP}} → Step 2-L DB prefix 맵 (고정값)
 Write: CLAUDE.md
 ```
 

@@ -8,6 +8,20 @@ Oracle 프로시저 중심의 레거시 인사시스템 ({{SYSTEM_NAME}}).
 Spring Boot 2.7.18 + MyBatis 3 + Java 8 + JSP + jQuery + IBSheet7 + Oracle.
 `.do` + `cmd=` 디스패치 패턴으로 모든 화면이 동작한다 — 상세는 `AGENTS.md` 참조.
 
+### 서브패키지 구조 (코드 탐색 시 참조)
+
+```
+{{SUBPACKAGE_MAP}}
+```
+
+### DB 테이블 prefix
+
+```
+{{DB_PREFIX_MAP}}
+```
+
+상세 코드맵: `CODE_MAP.md` | 상세 테이블맵: `DB_MAP.md`
+
 ## 2. 스킬 라우팅
 
 | 사용자 요청 | 사용 스킬/에이전트 |
