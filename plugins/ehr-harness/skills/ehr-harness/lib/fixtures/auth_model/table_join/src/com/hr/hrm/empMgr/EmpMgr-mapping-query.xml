@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<queryservice>
+  <query id="getEmpList">
+    <statement>
+      SELECT * FROM TEMP A
+       INNER JOIN THRM151_AUTH B ON B.AUTH_ID = A.AUTH_ID
+       WHERE A.ENTER_CD = :ssnEnterCd
+    </statement>
+  </query>
+</queryservice>

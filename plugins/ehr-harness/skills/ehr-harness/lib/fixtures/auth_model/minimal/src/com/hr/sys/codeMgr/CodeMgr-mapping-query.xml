@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<queryservice>
+  <query id="getCodeList">
+    <statement>SELECT * FROM TCODE WHERE ENTER_CD = :ssnEnterCd</statement>
+  </query>
+</queryservice>
