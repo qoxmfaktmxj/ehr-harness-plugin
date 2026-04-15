@@ -850,7 +850,7 @@ fi
 
 ### 2-N. analysis JSON 조립
 
-프로젝트 분석 결과를 `analysis` 필드로 조립한다. audit 모드가 drift 비교의 기준점으로 사용.
+프로젝트 분석 결과를 `analysis` 필드로 조립한다. audit 모드가 drift 비교의 기준점으로 사용하며, Step 3-B-pre 의 `ANALYSIS_SNAPSHOT_MD` 가 이 JSON 을 AGENTS.md 마크다운 테이블로 렌더한다. 필드 정의는 `HARNESS_SCHEMA.md::analysis` 참조.
 
 ```bash
 # analyze.sh 로드
@@ -873,7 +873,7 @@ echo "$ANALYSIS_JSON" | node -e "
 "
 ```
 
-→ `ANALYSIS_JSON` 을 Step 4-G hs_write_manifest 에 전달.
+→ `ANALYSIS_JSON` 을 Step 4-G `hs_write_manifest` 에 전달하여 `HARNESS.json::analysis` 필드로 영속화한다. 이후 audit 모드(`Step AUDIT-1`)가 이 값을 baseline 으로 꺼내 비교한다.
 
 ---
 
@@ -1058,7 +1058,7 @@ done
 
 ## Step AUDIT-REPORT: Drift 계산 + 리포트 (audit 모드 전용)
 
-이 단계는 `HARNESS_MODE=audit` 일 때만 실행한다.
+이 단계는 `HARNESS_MODE=audit` 일 때만 실행한다. 이전에 저장된 `HARNESS.json::analysis` (최근 하네스 생성/업데이트 시 `Step 2-N` 이 기록) 를 baseline 으로, 현재 프로젝트를 재분석한 결과와 diff 하여 drift 를 계산한다. 필드별 중요도 판정 규칙은 `audit.sh::drift_importance` 참조.
 
 ### AUDIT-1. 분석 스냅샷 diff
 

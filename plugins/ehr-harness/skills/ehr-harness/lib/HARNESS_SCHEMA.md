@@ -1,7 +1,7 @@
 # HARNESS.json Schema
 
 `.claude/HARNESS.json` 은 ehr-harness 메타 스킬이 생성한 하네스의 상태 매니페스트다.
-업데이트 모드가 이 파일을 읽고 비교해 변경분을 산출한다.
+업데이트 모드가 이 파일을 읽고 비교해 변경분을 산출하고, audit 모드는 `analysis` 필드를 baseline 으로 현재 프로젝트와의 drift 를 검사한다.
 
 ## Schema (version 3)
 
@@ -112,7 +112,7 @@
 
 ### `analysis` (v3 신규)
 
-프로젝트 심층 분석 결과 스냅샷. audit 모드가 drift 계산의 기준점으로 사용.
+프로젝트 심층 분석 결과 스냅샷. audit 모드가 drift 계산의 기준점으로 사용한다. SKILL.md `Step 2-N` 에서 `analyze.sh::build_analysis_json` 이 생성하고, `Step AUDIT-1` 이 현재 프로젝트 상태와 비교하여 drift 를 산출한다. AGENTS.md 의 `## 분석 스냅샷` 섹션에 렌더된 값이 이 필드와 동기화된다.
 
 | 필드 | 설명 |
 |------|------|
@@ -128,6 +128,8 @@
 | `trigger_count` | 전체 트리거 호출 수. |
 
 **저장 원칙**: 전체 목록이 큰 필드는 `_count` + `_sample`만 기록. 전체는 `procedure-tracer` 스킬이 동적 grep.
+
+**기록 시점**: `analysis` 는 fresh/legacy-adopt/stamped 재생성/audit 적용 시마다 새로 기록된다. audit 전략 `2 (보고서만)` 는 `analyzed_at` 만 갱신하고 다른 필드는 그대로 둔다 (baseline 유지).
 
 ## 기존 필드 의미 (v1 그대로)
 
@@ -162,11 +164,11 @@
 | `fresh` | 매니페스트 없음 + 하네스 흔적 없음 | 기존 흐름(전체 생성) |
 | `legacy` | 매니페스트 없음 + 하네스 흔적 있음 (AGENTS.md 등) 또는 schema_version ≠ 3 | adopt vs 전체 재생성 vs 취소 |
 | `stamped` | 매니페스트 존재 + schema_version == 3 | 업데이트 모드 (3-bucket diff, 플러그인 업데이트) |
-| `audit` | 매니페스트 존재 + schema_version == 3 + 사용자가 audit 키워드로 트리거 | 드리프트 검사 + 반자동 반영 (신규) |
+| `audit` | 매니페스트 존재 + schema_version == 3 + 사용자가 audit 키워드로 트리거 | 저장된 `analysis` vs 현재 재실행한 `analysis` 를 diff → 드리프트 검사 + 반자동 반영 (신규) |
 
 ## 마이그레이션 (v1/v2 → v3)
 
 v1/v2 매니페스트는 `hs_is_legacy` 가 `legacy` 로 분류하여 사용자에게 adopt 여부를 묻는다. adopt 선택 시 Step 4-G 가 새 감별 결과 + analysis 스냅샷과 함께 v3 매니페스트를 기록한다.
 
-- v1 → v3: 완전 재생성 (analysis 최초 기록)
-- v2 → v3: auth_model/db_verification/ddl_authoring 유지 + analysis 추가
+- v1 → v3: 완전 재생성 (analysis 최초 기록). 이전 stamped 상태가 없으므로 audit 진입 시 baseline 모드로 동작.
+- v2 → v3: auth_model/db_verification/ddl_authoring 유지 + analysis 추가. audit 가 바로 의미있는 drift 를 반환하려면 최소 1 회의 재생성이 필요하다 (analysis 없이는 비교 baseline 이 없음).
