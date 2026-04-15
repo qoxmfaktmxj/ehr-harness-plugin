@@ -231,3 +231,65 @@ collect_procedure_summary() {
 
   echo "{\"procedure_count\":$proc_count,\"procedure_sample\":[$sample_json],\"trigger_count\":$trig_count}"
 }
+
+# ── 분석 결과 전체 JSON 조립 ──
+# args: project_root profile
+# stdout: JSON 객체 (매니페스트의 analysis 필드 형태)
+build_analysis_json() {
+  local root="$1"
+  local profile="${2:-ehr4}"
+
+  local analyzed_at
+  analyzed_at=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)
+
+  local module_map
+  module_map=$(collect_module_map "$root" "$profile")
+
+  local session_vars
+  session_vars=$(collect_session_vars "$root" "$profile")
+
+  local auth_sql_ids
+  auth_sql_ids=$(collect_authSqlID "$root" "$profile")
+
+  local law_counts
+  law_counts=$(collect_law_counts "$root" "$profile")
+
+  local critical
+  critical=$(collect_critical_proc "$root" "$profile")
+
+  local proc_summary
+  proc_summary=$(collect_procedure_summary "$root" "$profile")
+
+  # found/missing 추출
+  local found_arr
+  found_arr=$(echo "$critical" | node -e "
+    let s='';process.stdin.on('data',d=>s+=d);
+    process.stdin.on('end',()=>{try{const m=JSON.parse(s);process.stdout.write(JSON.stringify(m.found));}catch(e){process.stdout.write('[]');}});
+  ")
+  local missing_arr
+  missing_arr=$(echo "$critical" | node -e "
+    let s='';process.stdin.on('data',d=>s+=d);
+    process.stdin.on('end',()=>{try{const m=JSON.parse(s);process.stdout.write(JSON.stringify(m.missing));}catch(e){process.stdout.write('[]');}});
+  ")
+
+  # procedure_count/sample/trigger_count 추출
+  local proc_count
+  proc_count=$(echo "$proc_summary" | node -e "
+    let s='';process.stdin.on('data',d=>s+=d);
+    process.stdin.on('end',()=>{try{const m=JSON.parse(s);process.stdout.write(String(m.procedure_count||0));}catch(e){process.stdout.write('0');}});
+  ")
+  local proc_sample_arr
+  proc_sample_arr=$(echo "$proc_summary" | node -e "
+    let s='';process.stdin.on('data',d=>s+=d);
+    process.stdin.on('end',()=>{try{const m=JSON.parse(s);process.stdout.write(JSON.stringify(m.procedure_sample||[]));}catch(e){process.stdout.write('[]');}});
+  ")
+  local trig_count
+  trig_count=$(echo "$proc_summary" | node -e "
+    let s='';process.stdin.on('data',d=>s+=d);
+    process.stdin.on('end',()=>{try{const m=JSON.parse(s);process.stdout.write(String(m.trigger_count||0));}catch(e){process.stdout.write('0');}});
+  ")
+
+  cat <<EOF
+{"analyzed_at":"$analyzed_at","module_map":$module_map,"session_vars":$session_vars,"authSqlID":$auth_sql_ids,"law_counts":$law_counts,"critical_proc_found":$found_arr,"critical_proc_missing":$missing_arr,"procedure_count":$proc_count,"procedure_sample":$proc_sample_arr,"trigger_count":$trig_count}
+EOF
+}

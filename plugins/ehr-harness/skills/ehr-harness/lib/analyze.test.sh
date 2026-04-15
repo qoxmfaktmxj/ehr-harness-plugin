@@ -123,4 +123,27 @@ echo "$RESULT" | grep -q '"procedure_sample"' \
   && pass "collect_procedure_summary: procedure_sample 존재" \
   || fail "collect_procedure_summary: procedure_sample missing ($RESULT)"
 
-echo "ALL ANALYZE TESTS PASSED (Task 3)"
+# ── build_analysis_json: 통합 JSON 스키마 ──
+RESULT=$(build_analysis_json "$FX/analysis/project_hr50" "ehr5")
+echo "$RESULT" | node -e "
+  let s='';process.stdin.on('data',d=>s+=d);
+  process.stdin.on('end',()=>{
+    try{const m=JSON.parse(s);
+      const required=['analyzed_at','module_map','session_vars','authSqlID','law_counts','critical_proc_found','critical_proc_missing','procedure_count','procedure_sample','trigger_count'];
+      required.forEach(k=>{if(!(k in m))throw new Error('missing key: '+k);});
+      if(!Array.isArray(m.module_map))throw new Error('module_map not array');
+      if(typeof m.law_counts!=='object')throw new Error('law_counts not object');
+      if(typeof m.procedure_count!=='number')throw new Error('procedure_count not number');
+      process.exit(0);
+    }catch(e){console.error(e.message);process.exit(1);}
+  });
+" >/dev/null 2>&1 \
+  && pass "build_analysis_json: 모든 필수 키 + 타입 유효" \
+  || fail "build_analysis_json: 스키마 실패 ($RESULT)"
+
+# ── analyzed_at ISO 8601 형식 ──
+echo "$RESULT" | grep -qE '"analyzed_at":"[0-9]{4}-[0-9]{2}-[0-9]{2}T' \
+  && pass "build_analysis_json: analyzed_at ISO 8601" \
+  || fail "build_analysis_json: analyzed_at 형식 이상 ($RESULT)"
+
+echo "ALL ANALYZE TESTS PASSED (Task 6)"
