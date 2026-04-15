@@ -1,0 +1,27 @@
+{
+  "version": "3.0",
+  "plugin_version": "1.3.0",
+  "profile": "ehr5",
+  "system_name": "EHR_REORDER_TEST",
+  "analysis": {
+    "analyzed_at": "2026-03-05T09:00:00+09:00",
+    "module_map": [
+      {"name": "hrm", "file_count": 120},
+      {"name": "cpn", "file_count": 95}
+    ],
+    "session_vars": ["ssnEnterCd", "ssnSabun"],
+    "authSqlID": ["THRM151"],
+    "law_counts": {
+      "A_direct_controller": 45,
+      "B_getData": 79,
+      "B_saveData": 68,
+      "C_hybrid": 12,
+      "D_execPrc": 15
+    },
+    "critical_proc_found": ["P_CPN_CAL_PAY_MAIN"],
+    "critical_proc_missing": [],
+    "procedure_count": 234,
+    "procedure_sample": ["P_CPN_CAL_PAY_MAIN"],
+    "trigger_count": 18
+  }
+}

@@ -14,7 +14,7 @@
 #   (2) 헤딩만 존재       → 헤딩은 유지, 본문 영역을 마커로 래핑하면서 교체
 #   (3) 헤딩도 없음       → 파일 끝에 `HEADING\n\n[start]\nBODY\n[end]\n` 로 append
 
-set -u
+set -u -o pipefail
 
 # ── 헬퍼: 파일에서 마커 쌍 사이 본문 추출 ──
 # args: FILE SECTION_ID
@@ -52,9 +52,13 @@ extract_section_heading() {
     let mi=-1;
     for(let i=0;i<lines.length;i++){ if(lines[i].trim()===marker){ mi=i; break; } }
     if(mi===-1){process.exit(2);}
+    // 마커 위쪽으로 탐색하되 다른 HARNESS-MANAGED 마커나 최상위 H1 은 경계로 본다.
     let found=null;
-    for(let j=mi-1;j>=0 && j>=mi-5;j--){
-      if(/^##\s/.test(lines[j])){ found=lines[j]; break; }
+    for(let j=mi-1;j>=0;j--){
+      const L=lines[j];
+      if(/<!--\s*\/?HARNESS-MANAGED:/.test(L)) break;
+      if(/^#\s/.test(L)) break;
+      if(/^##\s/.test(L)){ found=L; break; }
     }
     if(found===null){process.exit(3);}
     process.stdout.write(found);
@@ -86,6 +90,43 @@ merge_managed_section() {
     const eol = src.includes("\r\n") ? "\r\n" : "\n";
     // 작업 중에는 \n 으로 통일했다가 쓰기 직전에 원래 EOL 로 복원
     src = src.replace(/\r\n/g, "\n");
+
+    // ── 중복 마커 감지: 사용자 실수로 같은 섹션 ID 의 쌍이 두 번 이상 들어온 경우
+    //    첫 쌍만 유지하고 나머지 블록은 제거(orphan 방지) + stderr 경고.
+    const allStarts = [];
+    {
+      let p = 0;
+      while ((p = src.indexOf(start, p)) !== -1) { allStarts.push(p); p += start.length; }
+    }
+    const allEnds = [];
+    {
+      let p = 0;
+      while ((p = src.indexOf(end, p)) !== -1) { allEnds.push(p); p += end.length; }
+    }
+    if (allStarts.length > 1 || allEnds.length > 1) {
+      process.stderr.write(
+        `merge_managed_section: 중복 마커 감지 (${id}) — start ${allStarts.length}, end ${allEnds.length}. 첫 쌍만 유지하고 나머지 제거.\n`
+      );
+      // 역순으로 여분 블록 제거 (뒤에서부터 지워야 앞 인덱스가 유효)
+      const extras = [];
+      const pairCount = Math.min(allStarts.length, allEnds.length);
+      for (let i = 1; i < pairCount; i++) {
+        if (allEnds[i] > allStarts[i]) {
+          extras.push({ s: allStarts[i], e: allEnds[i] + end.length });
+        }
+      }
+      // 짝 없는 여분 마커도 제거
+      for (let i = pairCount; i < allStarts.length; i++) {
+        extras.push({ s: allStarts[i], e: allStarts[i] + start.length });
+      }
+      for (let i = pairCount; i < allEnds.length; i++) {
+        extras.push({ s: allEnds[i], e: allEnds[i] + end.length });
+      }
+      extras.sort((a, b) => b.s - a.s);
+      for (const ex of extras) {
+        src = src.slice(0, ex.s) + src.slice(ex.e);
+      }
+    }
 
     const startIdx = src.indexOf(start);
     const endIdx = src.indexOf(end);

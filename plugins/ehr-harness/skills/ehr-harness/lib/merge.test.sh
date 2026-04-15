@@ -157,6 +157,47 @@ H_OUT=$(extract_section_heading "$FX/case_c_marker_wrapped.md" "analysis_snapsho
   && pass "extract_section_heading: 마커 직전 H2 반환" \
   || fail "extract_section_heading: unexpected '$H_OUT'"
 
+# ── Case D: 중복 마커 → 첫 쌍만 교체 + 나머지 쌍 제거 (orphan 방지) ──
+TGT="$TMP/d.md"
+cp "$FX/case_d_duplicate_marker.md" "$TGT"
+merge_managed_section "$TGT" "$SECTION_ID" "$HEADING" "$NEW_BODY" 2>"$TMP/d.warn"
+
+CNT=$(grep -c "<!-- HARNESS-MANAGED:analysis_snapshot -->" "$TGT")
+[ "$CNT" = "1" ] \
+  && pass "Case D: 중복 마커 제거 후 start 1개만" \
+  || fail "Case D: start 마커 $CNT 개 (기대 1)"
+
+CNT_END=$(grep -c "<!-- /HARNESS-MANAGED:analysis_snapshot -->" "$TGT")
+[ "$CNT_END" = "1" ] \
+  && pass "Case D: 중복 마커 제거 후 end 1개만" \
+  || fail "Case D: end 마커 $CNT_END 개 (기대 1)"
+
+grep -q "두 번째 마커 블록" "$TGT" \
+  && fail "Case D: orphan 본문 잔존" \
+  || pass "Case D: 두 번째 orphan 본문 제거"
+
+grep -q "분석 시각 | 2026-04-15T12:00:00" "$TGT" \
+  && pass "Case D: 첫 쌍에 신규 body 반영" \
+  || fail "Case D: 신규 body 반영 실패"
+
+grep -q "## 사용자 메모" "$TGT" \
+  && pass "Case D: 사용자 섹션 보존" \
+  || fail "Case D: 사용자 섹션 소실"
+
+grep -q "## 마지막 섹션" "$TGT" \
+  && pass "Case D: 마지막 섹션 보존" \
+  || fail "Case D: 마지막 섹션 소실"
+
+grep -q "중복" "$TMP/d.warn" \
+  && pass "Case D: 중복 마커 경고 stderr 출력" \
+  || fail "Case D: 중복 마커 경고 미출력"
+
+# ── Case E: 헤딩이 마커에서 5줄 이상 떨어진 경우에도 추출 가능해야 ──
+H_OUT=$(extract_section_heading "$FX/case_e_heading_distant.md" "analysis_snapshot")
+[ "$H_OUT" = "## 분석 스냅샷 (자동 감별)" ] \
+  && pass "extract_section_heading: 멀리 있는 헤딩 (7줄 이상) 추출" \
+  || fail "extract_section_heading: 멀리 있는 헤딩 실패 (got '$H_OUT')"
+
 echo ""
 echo "=========================================="
 echo "  PASSED: $PASS / FAILED: $FAIL"

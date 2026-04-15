@@ -5,7 +5,7 @@
 #   source audit.sh
 #   compute_drift "$BEFORE_JSON" "$AFTER_JSON"
 
-set -u
+set -u -o pipefail
 
 # ── Drift 계산 ──
 # args: before_json after_json
@@ -17,6 +17,18 @@ compute_drift() {
   BEFORE="$before" AFTER="$after" node -e "
     const before = JSON.parse(process.env.BEFORE);
     const after  = JSON.parse(process.env.AFTER);
+
+    // stable stringify — 객체 키를 정렬해 비교함으로써
+    // '키 순서만 다른' 동일 객체가 changed 로 잡히는 false positive 를 방지.
+    const stable = (v) => {
+      if (v === null || v === undefined) return JSON.stringify(v);
+      if (Array.isArray(v)) return '[' + v.map(stable).join(',') + ']';
+      if (typeof v === 'object') {
+        const keys = Object.keys(v).sort();
+        return '{' + keys.map(k => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}';
+      }
+      return JSON.stringify(v);
+    };
 
     const setDiff = (a, b) => {
       const aS = new Set(a || []);
@@ -36,7 +48,7 @@ compute_drift() {
         if (!aMap.has(k)) added.push(v);
         else {
           const av = aMap.get(k);
-          if (JSON.stringify(av) !== JSON.stringify(v)) {
+          if (stable(av) !== stable(v)) {
             changed.push({ name: k, before: av, after: v });
           }
         }

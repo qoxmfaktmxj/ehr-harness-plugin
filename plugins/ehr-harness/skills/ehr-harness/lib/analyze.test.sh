@@ -57,6 +57,22 @@ echo "$RESULT" | grep -q '"TCPN201"' \
   && pass "collect_authSqlID: TCPN201 감지" \
   || fail "collect_authSqlID: TCPN201 missing ($RESULT)"
 
+# ── collect_authSqlID: false positive 차단 ──
+# 주석/문자열 속 "XXXX999" 류 ID 는 무시해야 하고,
+# 실제 paramMap.put 패턴만 감지해야 한다.
+RESULT=$(collect_authSqlID "$FX/analysis/project_false_positive" "ehr5")
+echo "$RESULT" | grep -q '"TVLD101"' \
+  && pass "collect_authSqlID: paramMap.put 패턴 감지 (TVLD101)" \
+  || fail "collect_authSqlID: paramMap.put 패턴 미감지 ($RESULT)"
+echo "$RESULT" | grep -q '"TVLD202"' \
+  && pass "collect_authSqlID: paramMap.put 패턴 감지 (TVLD202)" \
+  || fail "collect_authSqlID: paramMap.put 패턴 미감지 ($RESULT)"
+for fp in XXXX999 YYYY888 AAAA111 BBBB222 CCCC333; do
+  echo "$RESULT" | grep -q "\"$fp\"" \
+    && fail "collect_authSqlID: false positive ($fp 주석/문자열에서 검출됨) ($RESULT)" \
+    || pass "collect_authSqlID: 주석/문자열 $fp 무시"
+done
+
 # ── collect_law_counts: 법칙별 카운트 ──
 RESULT=$(collect_law_counts "$FX/analysis/project_hr50" "ehr5")
 # GetDataList.do 2번 (hrm, tim) + SaveData.do 1번 (hrm) + ExecPrc.do 1번 (cpn)

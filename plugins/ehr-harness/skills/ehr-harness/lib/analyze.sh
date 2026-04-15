@@ -7,7 +7,7 @@
 #   collect_session_vars "./project" "ehr5"
 #   build_analysis_json "./project" "ehr5"
 
-set -u
+set -u -o pipefail
 
 # ── 경로 결정 헬퍼 ──
 _java_root() {
@@ -98,11 +98,13 @@ collect_authSqlID() {
   local ids=()
   while IFS= read -r id; do
     [ -n "$id" ] && ids+=("\"$id\"")
-  # 실제 EHR5 는 `paramMap.put("authSqlID", "THRM151")` 처럼 쉼표/탭이 끼어든다.
-  # 기존 legacy 는 `authSqlID="TCPN201"` 형태. 두 경우를 모두 잡기 위해
-  # authSqlID 뒤 비식별자 1~15자 (공백/쉼표/탭/=/") 이후의 따옴표 ID 를 매칭.
-  done < <(grep -rhoE 'authSqlID[^A-Za-z0-9_]{1,15}"[A-Z]{4}[0-9]{3}"' --include="*.java" --include="*.jsp" "$root" 2>/dev/null \
-             | grep -oE '"[A-Z]{4}[0-9]{3}"' | sed 's/^"//;s/"$//' | sort -u)
+  # 구체화된 2가지 패턴만 수용 (주석/일반 문장에서의 false positive 차단):
+  #   1) legacy assign:   authSqlID = "XXXX###"   (공백 허용)
+  #   2) paramMap.put:    "authSqlID" , "XXXX###" (Java Map / JSON)
+  # sort 전 파이프에서 결과가 0건이면 grep 이 exit 1 을 리턴하므로,
+  # pipefail 환경에서도 빈 결과를 허용하기 위해 || true 로 감싼다.
+  done < <( { grep -rhoE '(authSqlID[[:space:]]*=[[:space:]]*"[A-Z]{4}[0-9]{3}"|"authSqlID"[[:space:]]*,[[:space:]]*"[A-Z]{4}[0-9]{3}")' --include="*.java" --include="*.jsp" "$root" 2>/dev/null || true; } \
+             | grep -oE '"[A-Z]{4}[0-9]{3}"' | sort -u | sed 's/^"//;s/"$//' )
 
   local joined
   joined=$(IFS=,; echo "${ids[*]:-}")

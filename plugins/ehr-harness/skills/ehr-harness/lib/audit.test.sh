@@ -130,4 +130,22 @@ grep -q "^## 프로젝트 Drift" "$TMP_R/report.md" \
   || fail "save_audit_report: 내용 누락"
 rm -rf "$TMP_R"
 
+# ── compute_drift: 키 순서만 다른 객체는 changed 로 잡지 않음 (stable stringify) ──
+REORDER_BEFORE=$(cat "$SCRIPT_DIR/fixtures/scenario_audit_reorder/HARNESS.json" | node -e "
+  let s='';process.stdin.on('data',d=>s+=d);
+  process.stdin.on('end',()=>{const m=JSON.parse(s);process.stdout.write(JSON.stringify(m.analysis));});
+")
+REORDER_AFTER=$(cat "$SCRIPT_DIR/fixtures/scenario_audit_reorder/new_analysis.json")
+
+RESULT=$(compute_drift "$REORDER_BEFORE" "$REORDER_AFTER")
+echo "$RESULT" | node -e "
+  let s='';process.stdin.on('data',d=>s+=d);
+  process.stdin.on('end',()=>{try{const m=JSON.parse(s);
+    if(m.module_map.changed.length!==0)throw new Error('module_map.changed should be empty for key reorder, got: '+JSON.stringify(m.module_map.changed));
+    process.exit(0);
+  }catch(e){console.error(e.message);process.exit(1);}});
+" >/dev/null 2>&1 \
+  && pass "compute_drift reorder: module_map 키 순서 변경은 changed 아님" \
+  || fail "compute_drift reorder: 키 순서 차이로 false changed 발생 ($RESULT)"
+
 echo "ALL DRIFT COMPUTE TESTS PASSED (Task 7)"
