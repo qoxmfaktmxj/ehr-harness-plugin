@@ -647,6 +647,79 @@ fi
 기존 `.claude/skills/ehr-design-guide/MANIFEST.json`이 있으면 `generated_at`을 비교해서
 일치하면 Step 2-K 이후 디자인 가이드 관련 생성(Step 3-F) 전체를 스킵한다.
 
+#### 2-J-6. DDL 폴더 감별 (ddl_authoring + db_verification)
+
+repo 내에 DDL 소스 폴더가 있는지 감별하여 `ddl_authoring.enabled` 와 `db_verification.b3_strategy` 를 결정한다.
+
+```bash
+# detect.sh 로드 (2-M과 공유)
+source "$PLUGIN_ROOT/skills/ehr-harness/lib/detect.sh"
+
+# DDL 폴더 감별 실행
+DDL_AUTH_JSON=$(detect_ddl_folder "$(pwd)")
+
+# DDL 폴더 enabled 여부에 따라 b3_strategy 결정
+DDL_ENABLED=$(echo "$DDL_AUTH_JSON" | node -e "
+  const m=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+  process.stdout.write(m.enabled ? 'yes' : 'no');
+")
+
+if [ "$DDL_ENABLED" = "yes" ]; then
+  if [ "$DB_MODE" = "direct" ]; then
+    B3_STRATEGY="ddl-first"
+  else
+    B3_STRATEGY="ddl-first"  # DDL 파일 있으면 DB 없어도 Tier 1으로 가능
+  fi
+  DB_ACCESS_STATE=$( [ "$DB_MODE" = "direct" ] && echo "available" || echo "unavailable" )
+elif [ "$DB_MODE" = "direct" ]; then
+  B3_STRATEGY="db-only"
+  DB_ACCESS_STATE="available"
+elif [ "$DB_MODE" = "dump" ]; then
+  B3_STRATEGY="ddl-first"  # dump도 DDL 소스로 간주
+  DB_ACCESS_STATE="dump-only"
+else
+  B3_STRATEGY="manual-required"
+  DB_ACCESS_STATE="unavailable"
+fi
+
+DB_VERIFICATION_JSON=$(DDL="$DDL_AUTH_JSON" DBA="$DB_ACCESS_STATE" B3S="$B3_STRATEGY" node -e "
+  const ddl=JSON.parse(process.env.DDL);
+  const out = {
+    ddl_path: ddl.table_path || null,
+    db_access: process.env.DBA,
+    b3_strategy: process.env.B3S
+  };
+  process.stdout.write(JSON.stringify(out));
+")
+
+echo "=== DDL 폴더 감별 결과 ==="
+echo "$DDL_AUTH_JSON" | node -e "
+  const m=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+  console.log('enabled:        ' + m.enabled);
+  console.log('table_path:     ' + (m.table_path||'(없음)'));
+  console.log('procedure_path: ' + (m.procedure_path||'(없음)'));
+  console.log('function_path:  ' + (m.function_path||'(없음)'));
+  console.log('naming_pattern: ' + (m.naming_pattern||'(없음)'));
+  console.log('existing_tables:' + m.existing_tables.length + '개');
+"
+echo "=== DB 검증 전략 ==="
+echo "db_access:    $DB_ACCESS_STATE"
+echo "b3_strategy:  $B3_STRATEGY"
+```
+
+**사용자 확인 프롬프트 (enabled=true 일 때만)**:
+
+```
+질문: "DDL 폴더가 감지됐습니다. screen-builder가 신규 테이블/프로시저/함수를 이 폴더에 자동 생성할 수 있습니다. 활성화할까요?"
+헤더: "DDL 자동 작성"
+  - 1: "활성화 — 생성 시 매번 이름 확인 프롬프트 제공"
+  - 2: "비활성화 — screen-builder는 '사용자가 DBA에 요청하세요' 안내만"
+```
+
+**[2] 비활성화**: `DDL_AUTH_JSON` 의 `enabled` 를 `false` 로 강제.
+
+→ `DDL_AUTH_JSON`, `DB_VERIFICATION_JSON` 을 이후 단계에서 사용.
+
 ### 2-M. 권한 모델 감별 (auth_model)
 
 프로젝트의 권한 주입 방식을 감별한다. reviewer 에이전트가 조건부 검증에 사용.
