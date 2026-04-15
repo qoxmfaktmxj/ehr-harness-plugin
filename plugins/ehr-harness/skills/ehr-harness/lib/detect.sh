@@ -8,6 +8,12 @@
 
 set -u
 
+# TODO(portability): \s+ 는 GNU grep 확장. macOS BSD grep 지원 시 [[:space:]]+ 로 통일 필요.
+#                    (이미 I5 fix로 대부분 치환 완료; 혹시 남은 곳 발견 시 수정)
+# TODO(session_vars): session.getAttribute("...") 리터럴만 감지. `req.getSession().getAttribute(...)`
+#                    또는 상수 키 (`session.getAttribute(KEY)`) 패턴은 누락됨. EHR 관행상 세션 변수명은
+#                    거의 항상 리터럴이므로 실용상 문제 없음.
+
 # ── 권한 모델 감별 ──
 # args: project_root profile(ehr4|ehr5)
 # stdout: JSON {common_controllers, auth_service_class, auth_injection_methods, auth_tables, auth_functions, session_vars}
@@ -32,27 +38,26 @@ detect_auth_model() {
   # 1) 공통 컨트롤러 존재 여부
   local common=()
   for ctrl in GetDataList SaveData ExecPrc; do
-    if grep -rlE "class\s+${ctrl}Controller" --include="*.java" "$java_root" >/dev/null 2>&1; then
+    if grep -rlE "class[[:space:]]+${ctrl}Controller([[:space:]{<]|$)" --include="*.java" "$java_root" >/dev/null 2>&1; then
       common+=("\"$ctrl\"")
     fi
   done
   local common_json
   common_json=$(IFS=,; echo "[${common[*]:-}]")
 
-  # 2) AuthTableService 존재 여부 (유사 클래스명도 감지)
+  # 2) AuthTableService 존재 여부 — 우선순위 순서로 스캔 (가장 구체적인 이름 우선)
   local auth_service="null"
-  local svc_match
-  svc_match=$(grep -rlE "class\s+(AuthTableService|AuthService|SqlAuthService)" --include="*.java" "$java_root" 2>/dev/null | head -1)
-  if [ -n "$svc_match" ]; then
-    local svc_name
-    svc_name=$(grep -oE "class\s+(AuthTableService|AuthService|SqlAuthService)" "$svc_match" | head -1 | awk '{print $2}')
-    auth_service="\"$svc_name\""
-  fi
+  for svc_name in AuthTableService SqlAuthService AuthService; do
+    if grep -rqE "class[[:space:]]+${svc_name}([[:space:]{<]|$)" --include="*.java" "$java_root" 2>/dev/null; then
+      auth_service="\"$svc_name\""
+      break
+    fi
+  done
 
   # 3) 권한 주입 방식
   local methods=()
-  # query_placeholder — ${query} 또는 $query (Velocity / MyBatis 공통)
-  if grep -rqE '\$\{?query\}?|:query' --include="$mapper_ext" --include="*.xml" "$root" 2>/dev/null; then
+  # query_placeholder — ${query} 또는 $query (식별자 경계 엄격)
+  if grep -rqE '\$\{query\}|\$query([^A-Za-z0-9_]|$)' --include="$mapper_ext" --include="*.xml" "$root" 2>/dev/null; then
     methods+=("\"query_placeholder\"")
   fi
   # auth_table_join — THRM151_AUTH 또는 THRM152_AUTH_MENU 직접 JOIN
