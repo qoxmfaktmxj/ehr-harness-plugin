@@ -41,6 +41,31 @@ OUT 파라미터 `sqlCode` / `sqlErrm` 로 결과 수신.
 
 ---
 
+## 권한 모델 (자동 감별)
+
+하네스 생성 시점에 프로젝트의 권한 주입 패턴을 실측하여 기록한 결과다. reviewer 에이전트는 이 값을 참조해 조건부 검증을 수행한다.
+
+{{AUTH_MODEL}}
+
+### reviewer 조건부 적용 규칙
+
+- `common_controllers` 에 `GetDataList` 없음 → 법칙 B 체크 생략
+- `auth_service_class` null → 법칙 C 체크 생략
+- `auth_injection_methods` 에 `query_placeholder` 없음 → B5를 `${query}` 대신 `auth_tables` JOIN 검증으로 전환
+- `auth_injection_methods` 비어있음 → B5/R-2 체크를 `:ssnEnterCd` WHERE 필터 유무만으로 축소
+
+## DB 검증 전략 (자동 감별)
+
+{{DB_VERIFICATION}}
+
+reviewer 에이전트의 B3 (컬럼 ↔ DDL) 검증은 `b3_strategy` 에 따라 아래 순서로 동작한다:
+
+1. `ddl-first`: repo의 `ddl_path` 에서 `CREATE TABLE` grep → 있으면 비교, 없으면 DB 조회 → 그래도 없으면 `CHECK` (수동 확인)
+2. `db-only`: DB 조회만. `USER_TAB_COLUMNS` 에서 컬럼명 확인
+3. `manual-required`: 둘 다 불가. reviewer는 B3을 자동으로 `CHECK` 로 보고 수동 확인 요청
+
+---
+
 ## 모듈 맵
 
 {{MODULE_MAP}}
