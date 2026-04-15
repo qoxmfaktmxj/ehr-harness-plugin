@@ -1,0 +1,2 @@
+@Service
+public class AuthTableService {}

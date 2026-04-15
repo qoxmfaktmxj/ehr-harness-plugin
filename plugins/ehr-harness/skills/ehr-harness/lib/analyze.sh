@@ -89,3 +89,70 @@ collect_session_vars() {
   joined=$(IFS=,; echo "${vars[*]:-}")
   echo "[$joined]"
 }
+
+# ── authSqlID 값 수집 ──
+# args: project_root profile
+# stdout: JSON 배열 ["THRM151", ...]
+collect_authSqlID() {
+  local root="$1"
+  local ids=()
+  while IFS= read -r id; do
+    [ -n "$id" ] && ids+=("\"$id\"")
+  done < <(grep -rhoE 'authSqlID["'\''[:space:]=]*"[A-Z]{4}[0-9]{3}"' --include="*.java" --include="*.jsp" "$root" 2>/dev/null \
+             | grep -oE '"[A-Z]{4}[0-9]{3}"' | sed 's/^"//;s/"$//' | sort -u)
+
+  local joined
+  joined=$(IFS=,; echo "${ids[*]:-}")
+  echo "[$joined]"
+}
+
+# ── 법칙 카운트 수집 ──
+# args: project_root profile
+# stdout: JSON 객체 {A_direct_controller, B_getData, B_saveData, C_hybrid, D_execPrc}
+collect_law_counts() {
+  local root="$1"
+  local profile="${2:-ehr4}"
+  local java_root
+  java_root=$(_java_root "$root" "$profile")
+  if [ ! -d "$java_root" ]; then
+    java_root="$root"
+  fi
+
+  local jsp_root
+  if [ "$profile" = "ehr5" ]; then
+    jsp_root="$root/src/main/webapp/WEB-INF/jsp"
+  else
+    jsp_root="$root/WebContent/WEB-INF/jsp"
+  fi
+  if [ ! -d "$jsp_root" ]; then
+    jsp_root="$root"
+  fi
+
+  # B_getData: GetDataList.do 호출 JSP 수
+  local b_get
+  b_get=$(grep -rlE "GetDataList\\.do" --include="*.jsp" "$jsp_root" 2>/dev/null | wc -l | tr -d ' ')
+
+  # B_saveData: SaveData.do 호출 JSP 수
+  local b_save
+  b_save=$(grep -rlE "SaveData\\.do" --include="*.jsp" "$jsp_root" 2>/dev/null | wc -l | tr -d ' ')
+
+  # D_execPrc: ExecPrc.do 호출 JSP 수
+  local d_exec
+  d_exec=$(grep -rlE "ExecPrc\\.do" --include="*.jsp" "$jsp_root" 2>/dev/null | wc -l | tr -d ' ')
+
+  # C_hybrid: AuthTableService 참조 파일 수
+  local c_hyb
+  c_hyb=$(grep -rlE "AuthTableService" --include="*.java" "$java_root" 2>/dev/null | wc -l | tr -d ' ')
+
+  # A_direct_controller: 전용 Controller 수 - 공통/AuthTableService 제외
+  local total_ctrl
+  total_ctrl=$(grep -rlE "class[[:space:]]+[A-Z][A-Za-z0-9_]*Controller" --include="*.java" "$java_root" 2>/dev/null | wc -l | tr -d ' ')
+  local common_ctrl
+  common_ctrl=$(grep -rlE "class[[:space:]]+(GetDataList|SaveData|ExecPrc)Controller" --include="*.java" "$java_root" 2>/dev/null | wc -l | tr -d ' ')
+  local a_direct=$(( total_ctrl - common_ctrl - c_hyb ))
+  [ $a_direct -lt 0 ] && a_direct=0
+
+  cat <<EOF
+{"A_direct_controller":$a_direct,"B_getData":$b_get,"B_saveData":$b_save,"C_hybrid":$c_hyb,"D_execPrc":$d_exec}
+EOF
+}
