@@ -9,7 +9,7 @@
 
 set -u
 
-HS_SCHEMA_VERSION=1
+HS_SCHEMA_VERSION=2
 
 # ── sha256 계산 (cross-platform) ──
 hs_sha256() {
@@ -56,7 +56,10 @@ hs_is_legacy() {
     }catch(e){process.stdout.write('');}
   ")
   if [ -z "$sv" ]; then
-    return 0  # legacy
+    return 0  # legacy (missing schema_version)
+  fi
+  if [ "$sv" != "$HS_SCHEMA_VERSION" ]; then
+    return 0  # legacy (version mismatch)
   fi
   return 1  # stamped
 }
@@ -133,7 +136,8 @@ hs_classify_file() {
 }
 
 # ── 매니페스트 새로 작성 ──
-# args: manifest_path plugin_version profile sources_json outputs_json [generated_at]
+# args: manifest_path plugin_version profile sources_json outputs_json
+#       [generated_at] [auth_model_json] [db_verification_json] [ddl_authoring_json]
 hs_write_manifest() {
   local manifest_path="$1"
   local plugin_version="$2"
@@ -141,6 +145,9 @@ hs_write_manifest() {
   local sources_json="$4"
   local outputs_json="$5"
   local generated_at="${6:-$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)}"
+  local auth_model_json="${7:-null}"
+  local db_verification_json="${8:-null}"
+  local ddl_authoring_json="${9:-null}"
   local updated_at
   updated_at=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)
 
@@ -151,11 +158,15 @@ hs_write_manifest() {
   PROF="$profile" \
   SRC_JSON="$sources_json" \
   OUT_JSON="$outputs_json" \
+  AUTH_JSON="$auth_model_json" \
+  DBV_JSON="$db_verification_json" \
+  DDL_JSON="$ddl_authoring_json" \
   GEN="$generated_at" \
   UPD="$updated_at" \
   SV="$HS_SCHEMA_VERSION" \
   node -e "
     const fs=require('fs');
+    const parse = (s) => { if (!s || s==='null') return null; try { return JSON.parse(s); } catch(e) { return null; } };
     const m={
       schema_version: Number(process.env.SV),
       plugin_name: 'ehr-harness',
@@ -165,6 +176,9 @@ hs_write_manifest() {
       updated_at: process.env.UPD,
       sources: JSON.parse(process.env.SRC_JSON),
       outputs: JSON.parse(process.env.OUT_JSON),
+      auth_model: parse(process.env.AUTH_JSON),
+      db_verification: parse(process.env.DBV_JSON),
+      ddl_authoring: parse(process.env.DDL_JSON),
     };
     fs.writeFileSync(process.env.MFP, JSON.stringify(m, null, 2));
   "

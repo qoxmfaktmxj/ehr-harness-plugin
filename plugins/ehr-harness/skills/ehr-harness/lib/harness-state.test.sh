@@ -106,7 +106,7 @@ bucket=$(hs_classify_file "$TMP/manifest.json" "newsrc.txt" "$TMP/missing_src" "
 hs_write_manifest "$TMP/written.json" "1.2.3" "ehr5" '{"a":"sha256:1"}' '{"b":"sha256:2"}'
 [ -f "$TMP/written.json" ] && pass "write_manifest creates file" || fail "write_manifest creates file"
 sv=$(MFP="$TMP/written.json" node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).schema_version)")
-[ "$sv" = "1" ] && pass "write_manifest schema_version" || fail "write_manifest schema_version (got: $sv)"
+[ "$sv" = "2" ] && pass "write_manifest schema_version" || fail "write_manifest schema_version (got: $sv)"
 pv=$(MFP="$TMP/written.json" node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).plugin_version)")
 [ "$pv" = "1.2.3" ] && pass "write_manifest plugin_version" || fail "write_manifest plugin_version (got: $pv)"
 pf=$(MFP="$TMP/written.json" node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).profile)")
@@ -127,5 +127,51 @@ gen=$(hs_get_generated_at "$FIXTURES/harness-v1.json")
 [ "$gen" = "2026-04-09T10:00:00+09:00" ] && pass "get_generated_at" || fail "get_generated_at (got: $gen)"
 prof=$(hs_get_profile "$FIXTURES/harness-v1.json")
 [ "$prof" = "ehr5" ] && pass "get_profile" || fail "get_profile (got: $prof)"
+
+# ── hs_is_legacy: v1 매니페스트는 legacy 로 분류되어야 함 ──
+TMP_V1="$(mktemp -d)"
+cat > "$TMP_V1/HARNESS.json" <<'EOF'
+{"schema_version": 1, "plugin_name": "ehr-harness"}
+EOF
+if hs_is_legacy "$TMP_V1/HARNESS.json"; then
+  pass "hs_is_legacy: schema_version=1 → legacy"
+else
+  fail "hs_is_legacy: schema_version=1 should be legacy (got stamped)"
+fi
+rm -rf "$TMP_V1"
+
+# ── hs_is_legacy: v2 매니페스트는 stamped 로 분류되어야 함 ──
+TMP_V2="$(mktemp -d)"
+cat > "$TMP_V2/HARNESS.json" <<'EOF'
+{"schema_version": 2, "plugin_name": "ehr-harness"}
+EOF
+if hs_is_legacy "$TMP_V2/HARNESS.json"; then
+  fail "hs_is_legacy: schema_version=2 should be stamped (got legacy)"
+else
+  pass "hs_is_legacy: schema_version=2 → stamped"
+fi
+rm -rf "$TMP_V2"
+
+# ── hs_write_manifest: auth_model/db_verification/ddl_authoring 필드 기록 ──
+TMP_W="$(mktemp -d)"
+hs_write_manifest \
+  "$TMP_W/HARNESS.json" \
+  "1.1.0" \
+  "ehr5" \
+  '{}' '{}' \
+  "" \
+  '{"common_controllers":["GetDataList"],"auth_service_class":"AuthTableService","auth_injection_methods":["query_placeholder"],"auth_tables":["THRM151_AUTH"],"auth_functions":[],"session_vars":["ssnEnterCd","ssnSabun"]}' \
+  '{"ddl_path":"src/main/resources/db/tables","db_access":"available","b3_strategy":"ddl-first"}' \
+  '{"enabled":true,"table_path":"src/main/resources/db/tables","procedure_path":null,"function_path":null,"naming_pattern":"{OBJECT_NAME}.sql","header_template_path":null,"existing_tables":["THRM101"]}'
+WRITTEN=$(cat "$TMP_W/HARNESS.json")
+if echo "$WRITTEN" | grep -q '"schema_version": 2' && \
+   echo "$WRITTEN" | grep -q '"auth_service_class": "AuthTableService"' && \
+   echo "$WRITTEN" | grep -q '"b3_strategy": "ddl-first"' && \
+   echo "$WRITTEN" | grep -q '"enabled": true'; then
+  pass "hs_write_manifest: v2 fields persisted"
+else
+  fail "hs_write_manifest: v2 fields missing. Got: $WRITTEN"
+fi
+rm -rf "$TMP_W"
 
 echo "ALL TESTS PASSED"
