@@ -1103,6 +1103,19 @@ DB_VERIFICATION_MD=$(DBV="$DB_VERIFICATION_JSON" node -e "
   console.log('| DB 접속 | ' + m.db_access + ' |');
   console.log('| B3 전략 | ' + m.b3_strategy + ' |');
 ")
+
+DDL_AUTHORING_MD=$(DDL="$DDL_AUTH_JSON" node -e "
+  const m=JSON.parse(process.env.DDL);
+  console.log('| 항목 | 값 |');
+  console.log('|------|-----|');
+  console.log('| 활성화 | ' + (m.enabled ? 'true (자동 작성 가능)' : 'false (수동 요청 필요)') + ' |');
+  console.log('| 테이블 경로 | ' + (m.table_path || '_(없음)_') + ' |');
+  console.log('| 프로시저 경로 | ' + (m.procedure_path || '_(없음)_') + ' |');
+  console.log('| 함수 경로 | ' + (m.function_path || '_(없음)_') + ' |');
+  console.log('| 명명 규칙 | ' + (m.naming_pattern || '_(없음)_') + ' |');
+  console.log('| 헤더 템플릿 | ' + (m.header_template_path || '_(없음)_') + ' |');
+  console.log('| 기존 테이블 수 | ' + m.existing_tables.length + '개 |');
+")
 ```
 
 ### 3-B. 문서 (skeleton/ + 실측값 → 프로젝트 루트)
@@ -1117,6 +1130,7 @@ Read: $PLUGIN_ROOT/profiles/$PROFILE/skeleton/AGENTS.md.skel
   {{LAW_C_COUNT}} → Step 2-C AuthTableService 카운트
   {{AUTH_MODEL}} → Step 2-M 생성한 AUTH_MODEL_MD (마크다운 테이블)
   {{DB_VERIFICATION}} → Step 2-J-6 결과 + Step 3-B-pre 생성한 DB_VERIFICATION_MD (마크다운 블록)
+  {{DDL_AUTHORING}} → Step 3-B-pre 생성한 DDL_AUTHORING_MD (마크다운 테이블)
 Write: AGENTS.md
 크기 확인: 200줄 초과 시 상세를 스킬로 이동 (권한 모델/DB 검증 섹션이 추가돼 기존보다 길어짐)
 ```

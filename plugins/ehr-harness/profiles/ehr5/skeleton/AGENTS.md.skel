@@ -73,6 +73,19 @@ reviewer 에이전트의 B3 (컬럼 ↔ DDL) 검증은 `b3_strategy` 에 따라 
 2. `db-only`: DB 조회만. `USER_TAB_COLUMNS` 에서 컬럼명 확인
 3. `manual-required`: 둘 다 불가. reviewer는 B3을 자동으로 `CHECK` 로 보고 수동 확인 요청
 
+## DDL 자동 작성 (자동 감별)
+
+하네스 생성 시점에 repo의 DDL 폴더 구조를 감별한 결과. screen-builder가 신규 테이블/프로시저/함수 생성 시 참조한다.
+
+{{DDL_AUTHORING}}
+
+### screen-builder 조건부 적용 규칙
+
+- `enabled` = false → screen-builder는 "DBA에게 수동 요청하세요" 안내만 출력
+- `enabled` = true → 각 신규 DB 객체에 대해 사용자 확인 프롬프트 + 이름 수정 옵션 제공
+- `existing_tables` 에 요청 이름이 있음 → "이미 존재하는 테이블. 기존 매퍼 수정 맞나요?" 로 에스컬레이션
+- 치명 네임스페이스 (`P_CPN_*`, `PKG_CPN_*`, `P_HRM_POST*`, `P_TIM_*`, `P_HRI_AFTER_*`) → 자동 생성 차단, 사용자 직접 작성 안내
+
 ---
 
 ## 모듈 맵
