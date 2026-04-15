@@ -1027,6 +1027,118 @@ done
 
 ---
 
+## Step AUDIT-REPORT: Drift 계산 + 리포트 (audit 모드 전용)
+
+이 단계는 `HARNESS_MODE=audit` 일 때만 실행한다.
+
+### AUDIT-1. 분석 스냅샷 diff
+
+```bash
+# analyze.sh + audit.sh 로드
+source "$PLUGIN_ROOT/skills/ehr-harness/lib/analyze.sh"
+source "$PLUGIN_ROOT/skills/ehr-harness/lib/audit.sh"
+
+# 저장된 analysis 조회
+STORED_ANALYSIS=$(hs_get_analysis "$MANIFEST")
+if [ "$STORED_ANALYSIS" = "null" ]; then
+  echo "⚠ 저장된 analysis 없음 — baseline 기록 모드로 진행"
+  BASELINE_MODE=1
+else
+  BASELINE_MODE=0
+fi
+
+# 새 분석 결과 조립
+NEW_ANALYSIS=$(build_analysis_json "$(pwd)" "$PROFILE")
+
+# Drift 계산 (baseline 모드면 빈 drift 반환)
+if [ "$BASELINE_MODE" = "1" ]; then
+  DRIFT='{"module_map":{"added":[],"removed":[],"changed":[]},"session_vars":{"added":[],"removed":[]},"authSqlID":{"added":[],"removed":[]},"critical_proc_found":{"added":[],"removed":[]},"law_counts":{},"procedure_count":{"changed":false},"trigger_count":{"changed":false}}'
+else
+  DRIFT=$(compute_drift "$STORED_ANALYSIS" "$NEW_ANALYSIS")
+fi
+
+IMPORTANCE=$(drift_importance "$DRIFT")
+```
+
+### AUDIT-2. 플러그인 업데이트 bucket (stamped 와 동일)
+
+Step 3-PRE-1~3 을 호출하여 `UNCHANGED`, `SAFE_UPDATES`, `USER_ONLY`, `CONFLICTS`, `NEW_FILES` 를 계산한다.
+
+### AUDIT-3. 통합 리포트 렌더링
+
+```bash
+STORED_PV=$(hs_plugin_version "$MANIFEST") # 또는 매니페스트에서 읽기
+CURRENT_PV=$(hs_plugin_version "$PLUGIN_ROOT")
+SYSTEM_NAME="{{감지된 시스템명}}"  # Step 2-A 등에서 이미 결정됨
+
+REPORT=$(render_audit_report "$DRIFT" "$IMPORTANCE" "$(date -Iseconds)" "$SYSTEM_NAME" "$PROFILE" "$STORED_PV" "$CURRENT_PV")
+
+# 플러그인 bucket 요약을 리포트 앞에 삽입
+PLUGIN_SECTION=$(cat <<EOF
+
+## 플러그인 업데이트
+
+- 새 파일: $(echo "$NEW_FILES" | wc -w) 개
+- 안전 업데이트: $(echo "$SAFE_UPDATES" | wc -w) 개
+- 사용자 편집(유지): $(echo "$USER_ONLY" | wc -w) 개
+- 충돌: $(echo "$CONFLICTS" | wc -w) 개
+EOF
+)
+REPORT_FULL="${REPORT}${PLUGIN_SECTION}"
+
+echo "$REPORT_FULL"
+```
+
+### AUDIT-4. 사용자 확인 프롬프트
+
+`AskUserQuestion` 도구 사용:
+
+```
+질문: "어떻게 진행할까요?"
+헤더: "audit 적용"
+  - 1: "반자동 적용 (추천)" — safe-update/new 자동, 상급 drift 개별 확인, 충돌은 bucket diff UX
+  - 2: "보고서만 저장" — docs/harness-audit-YYYYMMDD.md 저장, 변경 없음
+  - 3: "전체 재생성" — 모든 drift/업데이트 일괄 적용 (사용자 편집은 보존)
+  - 4: "취소"
+```
+
+응답을 `AUDIT_STRATEGY` 에 저장.
+
+### AUDIT-5. 전략별 분기
+
+| AUDIT_STRATEGY | 동작 |
+|---|---|
+| 1 (반자동) | AUDIT-6 (상급 drift 개별 확인) → 그 후 Step 3 Write + 매니페스트 갱신 |
+| 2 (보고서만) | `save_audit_report "$REPORT_FULL" "docs/harness-audit-$(date +%Y%m%d).md"` 후 Step 4 로 바로 이동 (매니페스트의 analyzed_at 만 갱신, 다른 필드 변화 없음) |
+| 3 (전체 재생성) | `UPDATE_STRATEGY=3` (stamped 와 동일: 모든 파일 Write) → Step 3 + 매니페스트 갱신 (새 analysis 저장) |
+| 4 (취소) | 즉시 종료 |
+
+### AUDIT-6. 상급 drift 개별 확인 (AUDIT_STRATEGY=1 일 때)
+
+`IMPORTANCE.high` 의 각 항목에 대해 `AskUserQuestion`:
+
+```
+질문: "{item 설명}을 AGENTS.md 에 반영할까요?"
+헤더: "drift 적용"
+  - 1: "반영"
+  - 2: "건너뜀"
+```
+
+각 항목 결정을 `HIGH_DECISIONS[<field>]` 연상배열에 저장한다 (`apply` | `skip`).
+
+**중급/하급은 반자동 적용 (사용자 확인 없음)**.
+
+### AUDIT-7. 최종 확인
+
+```
+질문: "다음 변경 적용: new=X개 safe=Y개 drift-applied=Z개 conflict=C개. 진행?"
+헤더: "최종 확정"
+  - 1: "적용"
+  - 2: "취소"
+```
+
+---
+
 ## Step 3: 파일 생성
 
 > **legacy adopt 가드:** `LEGACY_ADOPT=1` 이면 이 Step 3 전체를 스킵한다.
