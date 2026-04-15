@@ -160,5 +160,43 @@ echo "$RESULT" | node -e "
   && pass "ddl_folder present: JSON 유효 + 필수 키 전부 존재" \
   || fail "ddl_folder present: JSON 파싱 실패 또는 키 누락 ($RESULT)"
 
-echo "ALL DDL_FOLDER DETECTION TESTS PASSED"
+# ── ddl_folder/or_replace: CREATE OR REPLACE 지원 ──
+RESULT=$(detect_ddl_folder "$FX/ddl_folder/or_replace")
+echo "$RESULT" | grep -q '"enabled":true' \
+  && pass "ddl_folder or_replace: enabled=true" \
+  || fail "ddl_folder or_replace: not enabled ($RESULT)"
+echo "$RESULT" | grep -q '"TREPLACE"' \
+  && pass "ddl_folder or_replace: TREPLACE 추출" \
+  || fail "ddl_folder or_replace: TREPLACE missing ($RESULT)"
+
+# ── ddl_folder/tricky_names: 주석/스키마/IF NOT EXISTS/따옴표 처리 ──
+RESULT=$(detect_ddl_folder "$FX/ddl_folder/tricky_names")
+echo "$RESULT" | grep -q '"TFAKE"' \
+  && fail "ddl_folder tricky_names: TFAKE (주석) 잘못 추출됨 ($RESULT)" \
+  || pass "ddl_folder tricky_names: 주석 라인 제외"
+echo "$RESULT" | grep -q '"TQUALIFIED"' \
+  && pass "ddl_folder tricky_names: HR.TQUALIFIED → TQUALIFIED" \
+  || fail "ddl_folder tricky_names: schema prefix 제거 실패 ($RESULT)"
+echo "$RESULT" | grep -q '"TNOTEXIST"' \
+  && pass "ddl_folder tricky_names: IF NOT EXISTS 건너뛰기" \
+  || fail "ddl_folder tricky_names: IF NOT EXISTS 처리 실패 ($RESULT)"
+echo "$RESULT" | grep -q '"TQUOTED"' \
+  && pass "ddl_folder tricky_names: 따옴표 이름 처리" \
+  || fail "ddl_folder tricky_names: quoted name 처리 실패 ($RESULT)"
+echo "$RESULT" | grep -q '"IF"' \
+  && fail "ddl_folder tricky_names: IF 키워드가 테이블명으로 추출됨 ($RESULT)" \
+  || pass "ddl_folder tricky_names: IF 키워드 제외"
+
+# ── Windows 경로 JSON escape 검증 (Linux/git-bash에서도 항상 테스트) ──
+RESULT=$(detect_ddl_folder "$FX/ddl_folder/present")
+echo "$RESULT" | node -e "
+  let s='';process.stdin.on('data',d=>s+=d);
+  process.stdin.on('end',()=>{
+    try{JSON.parse(s);process.exit(0);}catch(e){console.error(e.message);process.exit(1);}
+  });
+" >/dev/null 2>&1 \
+  && pass "ddl_folder present: JSON.parse 성공 (경로 escape 무결성)" \
+  || fail "ddl_folder present: JSON.parse 실패 ($RESULT)"
+
 echo "ALL AUTH_MODEL DETECTION TESTS PASSED"
+echo "ALL DDL_FOLDER DETECTION TESTS PASSED"

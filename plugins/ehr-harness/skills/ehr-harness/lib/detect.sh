@@ -14,6 +14,14 @@ set -u
 #                    또는 상수 키 (`session.getAttribute(KEY)`) 패턴은 누락됨. EHR 관행상 세션 변수명은
 #                    거의 항상 리터럴이므로 실용상 문제 없음.
 
+# ── JSON 문자열 escape 헬퍼 ──
+# 백슬래시 / 더블쿼트만 처리 (Windows 경로 지원)
+# stdin으로 값을 받아 stdout으로 escape된 문자열(따옴표 없이)을 출력
+_json_escape() {
+  # 순서 중요: \ 먼저, 그 다음 "
+  sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
 # ── 권한 모델 감별 ──
 # args: project_root profile(ehr4|ehr5)
 # stdout: JSON {common_controllers, auth_service_class, auth_injection_methods, auth_tables, auth_functions, session_vars}
@@ -138,48 +146,79 @@ detect_ddl_folder() {
   local table_path="null" proc_path="null" func_path="null"
   for tbl_sub in tables table tbl; do
     if [ -d "$found_root/$tbl_sub" ]; then
-      table_path="\"$found_root/$tbl_sub\""
+      local esc
+      esc=$(printf '%s' "$found_root/$tbl_sub" | _json_escape)
+      table_path="\"$esc\""
       break
     fi
   done
   if [ "$table_path" = "null" ]; then
-    table_path="\"$found_root\""
+    local esc
+    esc=$(printf '%s' "$found_root" | _json_escape)
+    table_path="\"$esc\""
   fi
   for proc_sub in procedures procedure proc; do
     if [ -d "$found_root/$proc_sub" ]; then
-      proc_path="\"$found_root/$proc_sub\""
+      local esc
+      esc=$(printf '%s' "$found_root/$proc_sub" | _json_escape)
+      proc_path="\"$esc\""
       break
     fi
   done
   for fn_sub in functions function func; do
     if [ -d "$found_root/$fn_sub" ]; then
-      func_path="\"$found_root/$fn_sub\""
+      local esc
+      esc=$(printf '%s' "$found_root/$fn_sub" | _json_escape)
+      func_path="\"$esc\""
       break
     fi
   done
 
-  # 명명 규칙 샘플링 (테이블 파일 2~3개 이름 분석)
-  local sample_file
-  sample_file=$(find "${table_path//\"/}" -maxdepth 2 -name "*.sql" 2>/dev/null | head -1)
+  # 쿼트 제거 + JSON escape 역변환 (raw 경로로 복원)
+  local raw_table_path
+  if [ "$table_path" != "null" ]; then
+    raw_table_path=$(printf '%s' "$table_path" | sed 's/^"//; s/"$//; s/\\"/"/g; s/\\\\/\\/g')
+  else
+    raw_table_path=""
+  fi
+
+  # 명명 규칙 샘플링 — 최대 10개 파일 샘플링 후 다수결
   local naming_pattern="\"{OBJECT_NAME}.sql\""
-  if [ -n "$sample_file" ]; then
-    local fname
-    fname=$(basename "$sample_file")
-    # TBL_xxx.sql 패턴인가?
-    if echo "$fname" | grep -qE '^TBL_'; then
-      naming_pattern="\"TBL_{OBJECT_NAME}.sql\""
-    # YYYYMMDD_xxx.sql 패턴인가?
-    elif echo "$fname" | grep -qE '^[0-9]{8}_'; then
-      naming_pattern="\"YYYYMMDD_{OBJECT_NAME}.sql\""
+  if [ -n "$raw_table_path" ] && [ -d "$raw_table_path" ]; then
+    local sample_files total tbl_cnt yyyymmdd_cnt
+    sample_files=$(find "$raw_table_path" -maxdepth 2 -name "*.sql" 2>/dev/null | head -10)
+    total=$(printf '%s\n' "$sample_files" | grep -cE '.+' 2>/dev/null || true)
+    total=$(( total + 0 ))
+    if [ "$total" -gt 0 ]; then
+      local basenames
+      basenames=$(printf '%s\n' "$sample_files" | sed 's|.*/||')
+      tbl_cnt=$(printf '%s\n' "$basenames" | grep -cE '^TBL_' 2>/dev/null || true)
+      tbl_cnt=$(( tbl_cnt + 0 ))
+      yyyymmdd_cnt=$(printf '%s\n' "$basenames" | grep -cE '^[0-9]{8}_' 2>/dev/null || true)
+      yyyymmdd_cnt=$(( yyyymmdd_cnt + 0 ))
+      # 과반수면 해당 패턴, 아니면 default
+      if [ "$tbl_cnt" -gt $(( total / 2 )) ]; then
+        naming_pattern="\"TBL_{OBJECT_NAME}.sql\""
+      elif [ "$yyyymmdd_cnt" -gt $(( total / 2 )) ]; then
+        naming_pattern="\"YYYYMMDD_{OBJECT_NAME}.sql\""
+      fi
     fi
   fi
 
-  # 기존 테이블 이름 세트
+  # 테이블 이름 추출
+  # - `-- ` 주석 라인 제외
+  # - `IF NOT EXISTS` 건너뛰기
+  # - 스키마 prefix (`SCHEMA.TABLE`) 제거
+  # - 더블쿼트로 감싼 이름 (`"TABLE"`) 지원
   local existing=()
   while IFS= read -r tbl; do
     [ -n "$tbl" ] && existing+=("\"$tbl\"")
-  done < <(grep -rhoE "CREATE[[:space:]]+(OR[[:space:]]+REPLACE[[:space:]]+)?TABLE[[:space:]]+[A-Z][A-Z0-9_]+" "${table_path//\"/}" 2>/dev/null \
-             | sed -E 's/CREATE[[:space:]]+(OR[[:space:]]+REPLACE[[:space:]]+)?TABLE[[:space:]]+//' | sort -u)
+  done < <(grep -rhE "^[^-]*CREATE[[:space:]]+(OR[[:space:]]+REPLACE[[:space:]]+)?TABLE" "$raw_table_path" 2>/dev/null \
+             | grep -v -E '^[[:space:]]*--' \
+             | sed -E 's/.*CREATE[[:space:]]+(OR[[:space:]]+REPLACE[[:space:]]+)?TABLE[[:space:]]+(IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+)?//' \
+             | sed -E 's/^"([^"]+)".*/\1/; s/^([A-Z][A-Z0-9_]*)\.([A-Z][A-Z0-9_]*).*/\2/; s/^([A-Z][A-Z0-9_]*).*/\1/' \
+             | grep -E '^[A-Z][A-Z0-9_]+$' \
+             | sort -u)
   local existing_json
   existing_json=$(IFS=,; echo "[${existing[*]:-}]")
 
