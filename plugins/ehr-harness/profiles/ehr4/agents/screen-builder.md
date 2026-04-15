@@ -35,6 +35,116 @@ Grep: "class.*Controller" --glob="src/com/hr/{추정 모듈}/**"
 → 클래스명, URL 매핑, 쿼리 ID, 뷰 경로를 일괄 치환
 ```
 
+### Step 2.5: DB 객체 변경 필요 여부 판단
+
+이 단계는 `AGENTS.md` 의 `ddl_authoring.enabled` 가 true 일 때만 수행한다.
+
+```
+신규 화면이 요구하는 DB 객체 분석:
+  □ 신규 테이블 필요? (매퍼에서 새 TABLE 참조)
+  □ 신규 프로시저 필요? (비즈니스 로직 실행용)
+  □ 신규 함수 필요? (재사용 계산 로직)
+
+각 객체에 대해:
+  - 이미 AGENTS.md 의 ddl_authoring.existing_tables 에 있으면 → "기존 테이블 사용"
+  - 없으면 → Step 2.6 으로 진행 (사용자 확인 프롬프트)
+
+EHR4 매퍼 특성:
+  - 매퍼 파일명은 *-mapping-query.xml
+  - Velocity 바인딩: :param (안전), $var (치환), $query (권한 주입)
+  - DDL 생성 후 매퍼에서는 :bind 로 참조
+```
+
+### Step 2.6: DDL 파일 자동 생성 (옵션 B — 확인 프롬프트 + 이름 수정)
+
+각 신규 DB 객체에 대해 아래 프롬프트를 띄운다.
+
+**프롬프트 포맷**:
+```
+🔍 이 화면에 {객체타입}가 필요합니다.
+   목적: {화면 목적 요약}
+   제안 이름: {AGENTS.md ddl_authoring.naming_pattern 적용한 이름}
+
+   [Enter] 제안 이름으로 생성
+   [이름 입력] 다른 이름으로 생성
+   [n]      생성 취소 (수동 작성으로 전환)
+```
+
+**AskUserQuestion 도구 사용**:
+```
+질문: "이 화면에 {객체타입} {제안이름}를 생성하시겠습니까? (목적: {목적})"
+헤더: "DDL 생성 확인"
+  - 1: "제안 이름으로 생성"
+  - 2: "이름 수정 후 생성" (선택 시 사용자에게 새 이름 입력 요청)
+  - 3: "취소 — 수동 작성"
+```
+
+**안전 장치**:
+
+- **치명 오브젝트 네임스페이스 금지**: 객체 이름이 아래 접두사로 시작하면 자동 생성 차단 → 사용자 직접 작성 안내
+  - `P_CPN_*`, `P_HRI_AFTER_*`, `P_HRM_POST*`, `P_TIM_*`, `PKG_CPN_*`, `PKG_CPN_YEA_*`, `P_CPN_YEAREND_MONPAY_*`
+- **DROP/ALTER 자동 생성 금지**: CREATE만 자동화. 기존 테이블 수정 시 "ALTER TABLE 문을 파일로 작성해 DBA에게 전달하세요" 안내.
+- **중복 테이블 검증**: `existing_tables` 세트와 대조. 이미 있으면 "이미 존재하는 테이블. 기존 매퍼 수정 맞나요?" 로 에스컬레이션.
+
+**DDL 파일 생성 템플릿**:
+
+테이블:
+```sql
+-- {파일 헤더 (AGENTS.md ddl_authoring.header_template_path 참조)}
+-- 화면: {화면명}
+-- 생성: {오늘 날짜}
+
+CREATE TABLE {TABLE_NAME} (
+  ENTER_CD VARCHAR2(10) NOT NULL,
+  {신규 컬럼들}
+  CHKDATE DATE,
+  CHKID VARCHAR2(10),
+  CONSTRAINT PK_{TABLE_NAME} PRIMARY KEY (ENTER_CD, ...)
+);
+
+COMMENT ON TABLE {TABLE_NAME} IS '{화면 목적}';
+```
+
+프로시저 (스켈레톤만):
+```sql
+CREATE OR REPLACE PROCEDURE {PROC_NAME} (
+  I_ENTER_CD IN VARCHAR2,
+  I_SABUN    IN VARCHAR2,
+  O_SQL_CODE OUT VARCHAR2,
+  O_SQL_ERRM OUT VARCHAR2
+) IS
+BEGIN
+  -- TODO: 비즈니스 로직 구현 (사용자 작성 필요)
+  O_SQL_CODE := '0';
+  O_SQL_ERRM := NULL;
+EXCEPTION
+  WHEN OTHERS THEN
+    O_SQL_CODE := SQLCODE;
+    O_SQL_ERRM := SQLERRM;
+END {PROC_NAME};
+/
+```
+
+함수 (스켈레톤만):
+```sql
+CREATE OR REPLACE FUNCTION {FUNC_NAME} (
+  I_ENTER_CD IN VARCHAR2
+) RETURN VARCHAR2 IS
+BEGIN
+  -- TODO: 계산 로직 구현 (사용자 작성 필요)
+  RETURN NULL;
+END {FUNC_NAME};
+/
+```
+
+**생성 후 안내 메시지**:
+```
+⚠ DDL 파일 생성됨: {파일 경로}
+   — DB 반영은 수동 실행 필요합니다.
+   — reviewer 에이전트가 B3 검증 시 이 파일을 Tier 1 소스로 사용합니다.
+   — 매퍼 참조는 *-mapping-query.xml 파일에서 :bind 문법으로 작성하세요.
+```
+
 ### Step 3: 비즈니스 로직 적용
 ```
 치환 사전 작성:
