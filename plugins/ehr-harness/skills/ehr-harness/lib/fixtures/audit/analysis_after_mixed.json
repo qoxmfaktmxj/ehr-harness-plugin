@@ -1,0 +1,23 @@
+{
+  "analyzed_at": "2026-04-15T14:23:01+09:00",
+  "module_map": [
+    {"name": "hrm", "file_count": 120},
+    {"name": "cpn", "file_count": 95},
+    {"name": "tim", "file_count": 75},
+    {"name": "hrd", "file_count": 45}
+  ],
+  "session_vars": ["ssnEnterCd", "ssnSabun", "ssnSearchType", "ssnDeptCd"],
+  "authSqlID": ["THRM151", "TORG101"],
+  "law_counts": {
+    "A_direct_controller": 45,
+    "B_getData": 82,
+    "B_saveData": 68,
+    "C_hybrid": 14,
+    "D_execPrc": 15
+  },
+  "critical_proc_found": ["P_CPN_CAL_PAY_MAIN", "P_HRM_POST", "P_HRI_AFTER_PROC_EXEC"],
+  "critical_proc_missing": [],
+  "procedure_count": 238,
+  "procedure_sample": ["P_CPN_CAL_PAY_MAIN"],
+  "trigger_count": 18
+}
