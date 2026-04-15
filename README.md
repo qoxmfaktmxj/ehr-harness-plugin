@@ -245,7 +245,7 @@ cd /path/to/ehr-project
 | 6 | `.claude/hooks/db-read-only.sh` | ~35줄 | DML/DDL 차단 Bash 훅. |
 | 7 | `.claude/agents/screen-builder.md` | ~80줄 | 화면 생성 에이전트 시스템 프롬프트. |
 | 8 | `.claude/agents/procedure-tracer.md` | ~150줄 | 프로시저 분석 에이전트. |
-| 9 | `.claude/agents/release-reviewer.md` | ~260줄 | (EHR4 전용) 릴리즈 검증 에이전트. |
+| 9 | `.claude/agents/release-reviewer.md` | ~300줄 | 릴리즈 검증 + 회귀 판정 에이전트 (EHR4/EHR5 공통). 감별된 auth_model/db_verification에 따라 B1~B10 조건부 체크. |
 | 10 | `.claude/skills/domain-knowledge/SKILL.md` | ~400-750줄 | 도메인 지식 레퍼런스. |
 | 11 | `.claude/skills/screen-builder/SKILL.md` | ~400줄 | 화면 생성 코드 템플릿. |
 | 12 | `.claude/skills/codebase-navigator/SKILL.md` | ~200줄 | 코드 경로 탐색. |
@@ -382,7 +382,7 @@ Codex CLI:
 |----------|------|----------|
 | screen-builder.md | 역할, 실행 절차, 코드 패턴, 제약 | 고정 (프로파일별) |
 | procedure-tracer.md | 역할, 7-Layer, 추적 알고리즘, 치명 목록 | 고정 + **실측** (치명 목록) |
-| release-reviewer.md | (EHR4 전용) B1~B6 경계, 회귀 패턴, 판정 | 고정 |
+| release-reviewer.md | B1~B10 경계, 회귀 패턴, 5개 치명 위험, CHECK 판정 (EHR4/EHR5 공통, auth_model 기반 조건부) | 고정 |
 
 ---
 
@@ -545,7 +545,7 @@ find . -name "ojdbc*.jar" -o -name "tibero*.jar" 2>/dev/null
 4. 에이전트 (agents/ → .claude/agents/)
    screen-builder.md ← 프로파일별 고정
    procedure-tracer.md ← 고정 + 치명 목록 주입
-   release-reviewer.md ← (EHR4 전용) 고정
+   release-reviewer.md ← EHR4/EHR5 공통 (조건부 체크 매트릭스)
 
 5. Codex/Gemini 호환
    .agents/skills/ ← .claude/skills/ 전체 복사
@@ -556,8 +556,7 @@ find . -name "ojdbc*.jar" -o -name "tibero*.jar" 2>/dev/null
 
 ```
 1. 생성 파일 수 확인
-   EHR5: 17개 파일 (5 스킬 × 2 복사본 + 2 에이전트 + 5 문서/설정)
-   EHR4: 18개 파일 (위 + release-reviewer)
+   EHR4/EHR5: 18개 파일 (5 스킬 × 2 복사본 + 3 에이전트 + 5 문서/설정)
 
 2. AGENTS.md 교차 확인
    모듈 맵의 모듈 목록 vs 실제 디렉토리 목록 비교
@@ -641,11 +640,11 @@ profiles/
 | Java 경로 | `src/com/hr/{module}/` | `src/main/java/com/hr/{module}/` |
 | 매퍼 경로 | `src/com/hr/{module}/` | `src/main/resources/mapper/com/hr/{module}/` |
 | JSP 경로 | `WebContent/WEB-INF/jsp/` | `src/main/webapp/WEB-INF/jsp/` |
-| 에이전트 수 | 3개 (+ release-reviewer) | 2개 |
+| 에이전트 수 | 3개 | 3개 |
 | 금지 기술 | MyBatis 금지 | Anyframe 금지 |
 | 배치 크기 | 50건 (Velocity 바인드 변수 한계) | 1000건 (Oracle IN절 한계) |
 | domain-knowledge | 744줄 (10 섹션) | 411줄 (7 섹션) |
-| 추가 섹션 | B1~B6 경계, Velocity 레퍼런스, 릴리즈 리스크 | — |
+| 추가 섹션 | B1~B10 경계 (CHECK 판정 포함), Velocity 레퍼런스, 릴리즈 리스크 | — |
 
 ### 공통 사항 (프로파일 무관)
 
@@ -677,7 +676,7 @@ profiles/
 - Velocity 문법 레퍼런스 (EHR4)
 - 금지 사항 목록
 - 그린필드 금지 원칙
-- B1~B6 경계 검증 매트릭스 (EHR4)
+- B1~B10 경계 검증 매트릭스 + CHECK 판정 (EHR4/EHR5 공통)
 - 에이전트 역할 정의
 - db-read-only 훅
 
@@ -733,7 +732,7 @@ ehr-harness-plugin/
 │           │   ├── agents/       # 에이전트 (3개)
 │           │   │   ├── screen-builder.md
 │           │   │   ├── procedure-tracer.md
-│           │   │   └── release-reviewer.md   # EHR4 전용
+│           │   │   └── release-reviewer.md   # 릴리즈 검증 (조건부)
 │           │   └── skills/       # 스킬 (5개)
 │           │       ├── screen-builder/SKILL.md.skel
 │           │       ├── codebase-navigator/SKILL.md.skel
@@ -743,9 +742,48 @@ ehr-harness-plugin/
 │           │
 │           └── ehr5/             # EHR5 프로파일 (동일 구조)
 │               ├── skeleton/
-│               ├── agents/       # 에이전트 (2개)
+│               ├── agents/       # 에이전트 (3개, release-reviewer 포함)
 │               └── skills/       # 스킬 (5개)
 │
 ├── README.md                     # 이 파일
 └── .gitignore
 ```
+
+---
+
+## 12. Schema v2 신규 기능 (2026-04 추가)
+
+### 자동 감별 파이프라인
+
+하네스 생성 시점에 프로젝트의 특성을 자동 감별하여 HARNESS.json v2 에 기록한다:
+
+| 감별 항목 | 수집 방법 | 용도 |
+|-----------|----------|------|
+| `auth_model` | Java/매퍼 grep 으로 common_controllers, auth_service_class, 권한 주입 방식 검출 | reviewer 조건부 체크 판단 |
+| `db_verification` | DDL 폴더 존재 + DB 접속 상태로 b3_strategy 결정 | B3 검증 Tier 1/2/3 폴백 전략 |
+| `ddl_authoring` | repo 내 DDL 폴더 감별 (src/main/resources/db, ddl/, sql/ 등) | screen-builder 신규 DDL 파일 자동 생성 |
+
+감별 결과는 `AGENTS.md` 에 마크다운 테이블로 주입 + `HARNESS.json` 에 JSON 으로 저장. 사용자 확인 프롬프트로 수정 가능.
+
+### release-reviewer — 조건부 검증
+
+- **경계면 매트릭스**: B1~B10 (EHR5 전용 B7~B10 추가: 매퍼 파일명, cMap, NULL 센티넬, 감사 컬럼)
+- **조건부 적용**: `auth_model` 에 따라 B5/B6/R-2/R-4/R5 체크 생략 또는 변형
+- **판정**: PASS / FIX / REDO / HOLD / **CHECK** (5번째 — 자동 검증 불가 시 수동 확인 요청)
+- **DB 검증 폴백**: DDL 파일 → DB 접속 → 수동 (3-tier)
+
+### screen-builder — DDL 자동 작성
+
+`ddl_authoring.enabled = true` 일 때:
+
+1. 신규 화면이 요구하는 DB 객체 분석 (테이블/프로시저/함수)
+2. 사용자 확인 프롬프트 (목적 + 제안 이름 + [수정/취소] 옵션)
+3. CREATE 문 생성 → DDL 폴더에 파일 저장
+4. 치명 네임스페이스 (P_CPN_*, PKG_CPN_*, P_HRM_POST*, P_TIM_*, P_HRI_AFTER_*) 자동 차단
+5. 트리거는 연쇄 장애 위험으로 지원 제외
+
+### HARNESS.json v1 → v2 마이그레이션
+
+- v1 매니페스트는 `hs_is_legacy` 가 legacy 로 분류
+- 사용자에게 adopt 여부 묻고 v2 로 재스탬프
+- 기존 하네스 설치와 하위 호환 유지
