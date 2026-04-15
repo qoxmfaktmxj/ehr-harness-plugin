@@ -155,13 +155,23 @@ echo "HARNESS_MODE=$HARNESS_MODE"
 질문: "기존 하네스 흔적이 감지됐는데 버전 스탬프(.claude/HARNESS.json)가 없습니다. 어떻게 할까요?"
 헤더: "하네스 모드"
   - 1: "현 상태 인정 (adopt)" — 파일은 그대로 두고 스탬프만 새로 부여. 다음 실행부터 정상 업데이트 가능.
-  - 2: "전체 재생성" — 기존 동작. 모든 파일을 새로 덮어씀.
-  - 3: "취소" — 아무것도 안 함.
+  - 2: "기존 파일 유지 + 하네스 섹션 병합 (merge adopt)" — 사용자 편집 본문은 보존하면서, 플러그인이 관리하는 `<!-- HARNESS-MANAGED:... -->` 섹션만 최신 감별 결과로 갱신/추가. **권장 (기본값)**.
+  - 3: "전체 재생성" — 기존 동작. 모든 파일을 새로 덮어씀 (사용자 편집 소실 위험).
+  - 4: "취소" — 아무것도 안 함.
 ```
 
 - 응답이 1이면 → `LEGACY_ADOPT=1` 로 설정하고 Step 1 로 진행하되, **Step 3 의 모든 Write 를 스킵**하고 Step 4-G 에서 매니페스트만 새로 작성한다.
-- 응답이 2이면 → 기존 흐름. Step 1 → Step 4 진행 (`HARNESS_MODE=fresh` 와 동일하게 동작).
-- 응답이 3이면 → 즉시 종료.
+- 응답이 2이면 → `LEGACY_MERGE=1` 로 설정하고 Step 1 → Step 2 → Step 3 을 모두 수행한다. **Step 3-B 가 MERGE_MODE 분기로 진입하여** `AGENTS.md` 의 관리 섹션만 `merge.sh` 로 덮어쓰고, 그 외 출력 파일 (`CLAUDE.md`, `README.md`, `.claude/settings.json` 등) 은 이미 있으면 건드리지 않는다. 없는 파일은 정상적으로 Write.
+- 응답이 3이면 → 기존 흐름. Step 1 → Step 4 진행 (`HARNESS_MODE=fresh` 와 동일하게 동작, 전부 덮어쓰기).
+- 응답이 4이면 → 즉시 종료.
+
+> **관리 섹션 (`<!-- HARNESS-MANAGED:ID -->` 마커 기반)**:
+> - `auth_model` — 권한 모델 (Step 2-M 결과)
+> - `db_verification` — DB 검증 전략 (Step 2-J-6 + Step 3-B-pre DB_VERIFICATION_MD)
+> - `ddl_authoring` — DDL 자동 작성 설정 (Step 3-B-pre DDL_AUTHORING_MD)
+> - `analysis_snapshot` — 분석 스냅샷 (Step 3-B-pre ANALYSIS_SNAPSHOT_MD, audit drift baseline)
+>
+> `merge.sh` 는 섹션별로 다음 3 분기를 자동 적용한다: (1) 마커 쌍 존재 → 내부만 교체, (2) 헤딩만 있음 → 마커로 래핑 후 내용 교체, (3) 둘 다 없음 → 문서 끝에 새로 append.
 
 ### Step 0.7-B: 업데이트 모드 분기
 
@@ -1182,6 +1192,11 @@ echo "$REPORT_FULL"
 > fi
 > ```
 >
+> **legacy merge 가드:** `LEGACY_MERGE=1` 이면 Step 3 는 **실행하되**, 관리 파일 (`AGENTS.md`) 은 `merge.sh` 의 섹션 단위 교체로, 그 외 파일 (`CLAUDE.md`, `README.md`, `.claude/...`) 은 "이미 있으면 Write 스킵" 정책으로 처리한다.
+> 이유: 사용자가 직접 편집한 기존 문서를 보존하면서 플러그인이 관리하는 섹션만 최신 감별 결과로 업데이트하기 위함.
+>
+> 각 Step 3 하위 단계의 개별 블록 (3-A/3-B/3-C/...) 에 해당 가드 문구를 별도로 적어 둔다.
+>
 > **Selective Write 가드 (stamped 모드 전용):**
 >
 > `HARNESS_MODE=stamped` 일 때, Step 3 의 모든 Write 는 다음 헬퍼를 통과해야 한다.
@@ -1196,6 +1211,14 @@ echo "$REPORT_FULL"
 >   # legacy adopt 모드면 안 씀 (Step 3 자체가 스킵되지만 안전망)
 >   if [ "${LEGACY_ADOPT:-0}" = "1" ]; then
 >     return 1
+>   fi
+>   # legacy merge 모드: AGENTS.md 는 merge 경로에서 별도 처리되므로 일반 Write 스킵,
+>   # 그 외 파일은 이미 존재하면 스킵 (사용자 편집 보존), 없으면 fresh 와 동일하게 Write.
+>   if [ "${LEGACY_MERGE:-0}" = "1" ]; then
+>     if [ "$output_key" = "AGENTS.md" ]; then
+>       return 1
+>     fi
+>     [ -f "$output_key" ] && return 1 || return 0
 >   fi
 >   # stamped 모드면 WRITE_LIST 검사
 >   case " $WRITE_LIST " in
@@ -1317,6 +1340,34 @@ Write: AGENTS.md
 크기 확인: 200줄 초과 시 상세를 스킬로 이동 (권한 모델/DB 검증 섹션이 추가돼 기존보다 길어짐)
 ```
 
+> **`LEGACY_MERGE=1` 일 때 (merge adopt 모드)**: 위 치환 결과를 `AGENTS.md` 로 바로 Write 하지 않고, 관리 섹션만 기존 문서에 merge 한다.
+>
+> ```bash
+> # 1. 치환 결과를 임시 후보 파일로 렌더
+> render_skel_with_substitutions \
+>   "$PLUGIN_ROOT/profiles/$PROFILE/skeleton/AGENTS.md.skel" \
+>   > /tmp/agents_candidate.md
+>
+> # 2. merge.sh 로드
+> source "$PLUGIN_ROOT/skills/ehr-harness/lib/merge.sh"
+>
+> # 3. 4 개 관리 섹션을 각각 기존 AGENTS.md 에 merge.
+> #    - AGENTS.md 가 없으면 후보 파일을 그대로 Write (merge 없이 fresh 경로).
+> if [ ! -f AGENTS.md ]; then
+>   cp /tmp/agents_candidate.md AGENTS.md
+> else
+>   for SID in auth_model db_verification ddl_authoring analysis_snapshot; do
+>     BODY=$(extract_section_body /tmp/agents_candidate.md "$SID")
+>     HEADING=$(extract_section_heading /tmp/agents_candidate.md "$SID")
+>     merge_managed_section "AGENTS.md" "$SID" "$HEADING" "$BODY"
+>     echo "  · merge: $SID → AGENTS.md"
+>   done
+> fi
+> rm -f /tmp/agents_candidate.md
+> ```
+>
+> 이 분기를 탔을 때 `AGENTS.md` 의 outputs sha 는 merge 후 파일 sha 로 Step 4-G 에서 기록한다.
+
 ```
 Read: $PLUGIN_ROOT/profiles/$PROFILE/skeleton/CLAUDE.md.skel
 치환:
@@ -1327,6 +1378,9 @@ Read: $PLUGIN_ROOT/profiles/$PROFILE/skeleton/CLAUDE.md.skel
 Write: CLAUDE.md
 ```
 
+> **`LEGACY_MERGE=1` 일 때**: `CLAUDE.md` 가 이미 있으면 Write 를 스킵하고 기존 파일을 유지한다 (사용자 편집 보존). 없으면 정상 Write.
+> (AGENTS.md 외 파일은 현재 관리 섹션 정의가 없어 merge 대신 "skip if exists" 로 동작. 향후 필요 시 섹션 마커 도입.)
+
 ```
 Read: $PLUGIN_ROOT/profiles/$PROFILE/skeleton/README.md.skel
 치환:
@@ -1335,6 +1389,8 @@ Read: $PLUGIN_ROOT/profiles/$PROFILE/skeleton/README.md.skel
   {{GENERATED_DATE}} → 오늘 날짜
 Write: README.md
 ```
+
+> **`LEGACY_MERGE=1` 일 때**: `README.md` 가 이미 있으면 Write 를 스킵, 기존 유지.
 
 ### 3-C. 스킬 (skills/ + 실측값 → .claude/skills/)
 
