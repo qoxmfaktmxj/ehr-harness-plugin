@@ -1274,6 +1274,29 @@ DDL_AUTHORING_MD=$(DDL="$DDL_AUTH_JSON" node -e "
   console.log('| 헤더 템플릿 | ' + (m.header_template_path || '_(없음)_') + ' |');
   console.log('| 기존 테이블 수 | ' + m.existing_tables.length + '개 |');
 ")
+
+# ANALYSIS_SNAPSHOT_MD — Step 2-N ANALYSIS_JSON 을 AGENTS.md용 정량 지표 테이블로 렌더.
+# 이 값이 audit 모드의 drift baseline. MODULE_MAP/SESSION_VARS 와 중복되지 않는 요약만 표기.
+ANALYSIS_SNAPSHOT_MD=$(AJ="$ANALYSIS_JSON" node -e "
+  const m=JSON.parse(process.env.AJ);
+  const lc=m.law_counts||{};
+  const missing=(m.critical_proc_missing||[]);
+  console.log('| 항목 | 값 |');
+  console.log('|------|-----|');
+  console.log('| 분석 시각 | ' + (m.analyzed_at || '_(미기록)_') + ' |');
+  console.log('| 모듈 수 | ' + (m.module_map||[]).length + ' |');
+  console.log('| 세션 변수 수 | ' + (m.session_vars||[]).length + ' |');
+  console.log('| authSqlID 수 | ' + (m.authSqlID||[]).length + ' |');
+  console.log('| 법칙 A (전용 컨트롤러) | ' + (lc.A_direct_controller||0) + ' |');
+  console.log('| 법칙 B (GetDataList/SaveData) | ' + (lc.B_getData||0) + ' / ' + (lc.B_saveData||0) + ' |');
+  console.log('| 법칙 C (AuthTableService) | ' + (lc.C_hybrid||0) + ' |');
+  console.log('| 법칙 D (ExecPrc) | ' + (lc.D_execPrc||0) + ' |');
+  console.log('| 치명 프로시저 (발견/미발견) | ' + (m.critical_proc_found||[]).length + ' / ' + missing.length + ' |');
+  console.log('| 전체 프로시저 수 (매퍼 참조) | ' + (m.procedure_count||0) + ' |');
+  console.log('| 트리거 수 (매퍼/코드 참조) | ' + (m.trigger_count||0) + ' |');
+  console.log('');
+  console.log('누락된 치명 프로시저: ' + (missing.length ? missing.join(', ') : '_(없음)_'));
+")
 ```
 
 ### 3-B. 문서 (skeleton/ + 실측값 → 프로젝트 루트)
@@ -1289,6 +1312,7 @@ Read: $PLUGIN_ROOT/profiles/$PROFILE/skeleton/AGENTS.md.skel
   {{AUTH_MODEL}} → Step 2-M 생성한 AUTH_MODEL_MD (마크다운 테이블)
   {{DB_VERIFICATION}} → Step 2-J-6 결과 + Step 3-B-pre 생성한 DB_VERIFICATION_MD (마크다운 블록)
   {{DDL_AUTHORING}} → Step 3-B-pre 생성한 DDL_AUTHORING_MD (마크다운 테이블)
+  {{ANALYSIS_SNAPSHOT}} → Step 3-B-pre 생성한 ANALYSIS_SNAPSHOT_MD (정량 지표 테이블 + 누락 치명 프로시저). audit 모드 drift baseline.
 Write: AGENTS.md
 크기 확인: 200줄 초과 시 상세를 스킬로 이동 (권한 모델/DB 검증 섹션이 추가돼 기존보다 길어짐)
 ```
