@@ -647,7 +647,7 @@ fi
 기존 `.claude/skills/ehr-design-guide/MANIFEST.json`이 있으면 `generated_at`을 비교해서
 일치하면 Step 2-K 이후 디자인 가이드 관련 생성(Step 3-F) 전체를 스킵한다.
 
-### 2-K. 권한 모델 감별 (auth_model)
+### 2-M. 권한 모델 감별 (auth_model)
 
 프로젝트의 권한 주입 방식을 감별한다. reviewer 에이전트가 조건부 검증에 사용.
 
