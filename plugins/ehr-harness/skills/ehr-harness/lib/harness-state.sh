@@ -166,7 +166,11 @@ hs_write_manifest() {
   SV="$HS_SCHEMA_VERSION" \
   node -e "
     const fs=require('fs');
-    const parse = (s) => { if (!s || s==='null') return null; try { return JSON.parse(s); } catch(e) { return null; } };
+    const parse = (s, name) => {
+      if (!s || s==='null') return null;
+      try { return JSON.parse(s); }
+      catch(e) { console.error('hs_write_manifest: invalid JSON for ' + name + ': ' + e.message); process.exit(1); }
+    };
     const m={
       schema_version: Number(process.env.SV),
       plugin_name: 'ehr-harness',
@@ -176,9 +180,9 @@ hs_write_manifest() {
       updated_at: process.env.UPD,
       sources: JSON.parse(process.env.SRC_JSON),
       outputs: JSON.parse(process.env.OUT_JSON),
-      auth_model: parse(process.env.AUTH_JSON),
-      db_verification: parse(process.env.DBV_JSON),
-      ddl_authoring: parse(process.env.DDL_JSON),
+      auth_model: parse(process.env.AUTH_JSON, 'auth_model'),
+      db_verification: parse(process.env.DBV_JSON, 'db_verification'),
+      ddl_authoring: parse(process.env.DDL_JSON, 'ddl_authoring'),
     };
     fs.writeFileSync(process.env.MFP, JSON.stringify(m, null, 2));
   "

@@ -42,14 +42,14 @@ sha_missing=$(hs_sha256 "$TMP/nope.txt")
 hs_is_legacy "$TMP/nope.json" && pass "legacy: missing file" || fail "legacy: missing file"
 echo "{}" > "$TMP/empty.json"
 hs_is_legacy "$TMP/empty.json" && pass "legacy: empty manifest" || fail "legacy: empty manifest"
-hs_is_legacy "$FIXTURES/harness-v1.json" && fail "legacy: stamped should NOT be legacy" || pass "legacy: stamped → not legacy"
+hs_is_legacy "$FIXTURES/harness-v2.json" && fail "legacy: stamped should NOT be legacy" || pass "legacy: stamped → not legacy"
 
 # ── 3. hs_get_output_sha / hs_get_source_sha ──
-out=$(hs_get_output_sha "$FIXTURES/harness-v1.json" ".claude/settings.json")
+out=$(hs_get_output_sha "$FIXTURES/harness-v2.json" ".claude/settings.json")
 [ "$out" = "sha256:aaa" ] && pass "get_output_sha" || fail "get_output_sha (got: $out)"
-src=$(hs_get_source_sha "$FIXTURES/harness-v1.json" "profiles/shared/settings.json")
+src=$(hs_get_source_sha "$FIXTURES/harness-v2.json" "profiles/shared/settings.json")
 [ "$src" = "sha256:111" ] && pass "get_source_sha" || fail "get_source_sha (got: $src)"
-miss=$(hs_get_output_sha "$FIXTURES/harness-v1.json" "nope")
+miss=$(hs_get_output_sha "$FIXTURES/harness-v2.json" "nope")
 [ -z "$miss" ] && pass "get_output_sha missing → empty" || fail "get_output_sha missing → empty"
 
 # ── 4. hs_classify_file ──
@@ -123,9 +123,9 @@ v_missing=$(hs_plugin_version "$TMP/no_such_plugin")
 [ "$v_missing" = "unknown" ] && pass "plugin_version missing → unknown" || fail "plugin_version missing → unknown (got: $v_missing)"
 
 # ── 7. hs_get_generated_at / hs_get_profile ──
-gen=$(hs_get_generated_at "$FIXTURES/harness-v1.json")
+gen=$(hs_get_generated_at "$FIXTURES/harness-v2.json")
 [ "$gen" = "2026-04-09T10:00:00+09:00" ] && pass "get_generated_at" || fail "get_generated_at (got: $gen)"
-prof=$(hs_get_profile "$FIXTURES/harness-v1.json")
+prof=$(hs_get_profile "$FIXTURES/harness-v2.json")
 [ "$prof" = "ehr5" ] && pass "get_profile" || fail "get_profile (got: $prof)"
 
 # ── hs_is_legacy: v1 매니페스트는 legacy 로 분류되어야 함 ──
@@ -173,5 +173,19 @@ else
   fail "hs_write_manifest: v2 fields missing. Got: $WRITTEN"
 fi
 rm -rf "$TMP_W"
+
+# ── hs_write_manifest: 옵셔널 인자 미제공 시 v2 필드가 null 이어야 함 ──
+TMP_D="$(mktemp -d)"
+hs_write_manifest "$TMP_D/m.json" "1.0.0" "ehr5" '{}' '{}'
+HAVE_NULL=$(MFP="$TMP_D/m.json" node -e "
+  const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8'));
+  console.log([m.auth_model, m.db_verification, m.ddl_authoring].every(x => x === null));
+")
+if [ "$HAVE_NULL" = "true" ]; then
+  pass "write_manifest: defaults to null when v2 args omitted"
+else
+  fail "write_manifest: defaults should be null (got: $HAVE_NULL)"
+fi
+rm -rf "$TMP_D"
 
 echo "ALL TESTS PASSED"
