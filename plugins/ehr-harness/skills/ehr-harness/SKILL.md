@@ -128,7 +128,7 @@ if [ ! -f "$MANIFEST" ] && [ "$HAS_HARNESS_TRACE" = "0" ]; then
 elif [ ! -f "$MANIFEST" ] && [ "$HAS_HARNESS_TRACE" = "1" ]; then
   HARNESS_MODE="legacy"
 elif hs_is_legacy "$MANIFEST"; then
-  # 매니페스트 파일은 있으나 schema_version 없음 → legacy 와 동일 취급
+  # 매니페스트 파일은 있으나 schema_version 없거나 현재 버전(2)과 다름 → legacy 와 동일 취급
   HARNESS_MODE="legacy"
 else
   HARNESS_MODE="stamped"
@@ -646,6 +646,54 @@ fi
 **증분 갱신**:
 기존 `.claude/skills/ehr-design-guide/MANIFEST.json`이 있으면 `generated_at`을 비교해서
 일치하면 Step 2-K 이후 디자인 가이드 관련 생성(Step 3-F) 전체를 스킵한다.
+
+### 2-K. 권한 모델 감별 (auth_model)
+
+프로젝트의 권한 주입 방식을 감별한다. reviewer 에이전트가 조건부 검증에 사용.
+
+```bash
+# detect.sh 로드
+source "$PLUGIN_ROOT/skills/ehr-harness/lib/detect.sh"
+
+# 권한 모델 감별 실행
+AUTH_MODEL_JSON=$(detect_auth_model "$(pwd)" "$PROFILE")
+
+# 사람이 읽기 쉬운 마크다운 테이블 생성 (AGENTS.md 용)
+AUTH_MODEL_MD=$(AM="$AUTH_MODEL_JSON" node -e "
+  const m=JSON.parse(process.env.AM);
+  const row = (k, v) => {
+    const val = Array.isArray(v) ? (v.length ? v.join(', ') : '_(없음)_') : (v || '_(없음)_');
+    return '| ' + k + ' | ' + val + ' |';
+  };
+  console.log('| 항목 | 값 |');
+  console.log('|------|-----|');
+  console.log(row('공통 컨트롤러', m.common_controllers));
+  console.log(row('권한 서비스 클래스', m.auth_service_class));
+  console.log(row('권한 주입 방식', m.auth_injection_methods));
+  console.log(row('권한 테이블', m.auth_tables));
+  console.log(row('권한 함수', m.auth_functions));
+  console.log(row('세션 변수', m.session_vars));
+")
+
+echo "=== 권한 모델 감별 결과 ==="
+echo "$AUTH_MODEL_MD"
+```
+
+**사용자 확인 프롬프트 (AskUserQuestion 도구 사용)**:
+
+```
+질문: "감별된 권한 모델이 맞나요? 틀리면 reviewer가 잘못된 체크를 합니다."
+헤더: "권한 모델 확인"
+  - 1: "맞음 — 그대로 기록"
+  - 2: "수정 필요 — 직접 입력"
+  - 3: "감별 건너뛰기 — auth_model 비어있음으로 기록 (reviewer가 해당 체크 생략)"
+```
+
+**[2] 수정 필요**: 사용자가 자유 텍스트로 수정한 JSON 블록 제공 → 파싱 후 `AUTH_MODEL_JSON` 재구성.
+
+**[3] 감별 건너뛰기**: `AUTH_MODEL_JSON='{"common_controllers":[],"auth_service_class":null,"auth_injection_methods":[],"auth_tables":[],"auth_functions":[],"session_vars":[]}'`
+
+→ `AUTH_MODEL_JSON` 과 `AUTH_MODEL_MD` 를 이후 단계에서 사용.
 
 ### 2-L. 서브패키지 맵 + DB prefix 맵 생성
 
