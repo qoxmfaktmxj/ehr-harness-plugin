@@ -134,3 +134,102 @@ drift_importance() {
     process.stdout.write(JSON.stringify({ high, medium, low }));
   "
 }
+
+# ── Audit 리포트 렌더링 ──
+# args: drift_json importance_json analyzed_at system_name profile plugin_ver_old plugin_ver_new
+# stdout: 마크다운 리포트
+render_audit_report() {
+  local drift="$1"
+  local importance="$2"
+  local analyzed_at="$3"
+  local system_name="${4:-unknown}"
+  local profile="${5:-unknown}"
+  local plugin_old="${6:-unknown}"
+  local plugin_new="${7:-unknown}"
+
+  DRIFT="$drift" IMP="$importance" \
+  AT="$analyzed_at" SYS="$system_name" PROF="$profile" \
+  PVO="$plugin_old" PVN="$plugin_new" \
+  node -e "
+    const drift = JSON.parse(process.env.DRIFT);
+    const imp = JSON.parse(process.env.IMP);
+    const at = process.env.AT;
+    const sys = process.env.SYS;
+    const prof = process.env.PROF;
+    const pvo = process.env.PVO;
+    const pvn = process.env.PVN;
+
+    const lines = [];
+    lines.push('# 하네스 점검 보고서 (' + at + ')');
+    lines.push('');
+    lines.push('**프로젝트**: ' + sys + ' (' + prof.toUpperCase() + ')');
+    lines.push('**플러그인**: ehr-harness ' + pvo + ' → ' + pvn);
+    lines.push('');
+    lines.push('## 프로젝트 Drift');
+    lines.push('');
+
+    // 상
+    if (imp.high.length === 0) {
+      lines.push('### [상] 상급 drift 없음');
+    } else {
+      imp.high.forEach(h => {
+        lines.push('### [상] ' + h.field);
+        if (h.items) {
+          h.items.forEach(it => {
+            if (typeof it === 'string') lines.push('  - ' + it);
+            else lines.push('  - ' + JSON.stringify(it));
+          });
+        } else {
+          lines.push('  ' + JSON.stringify(h));
+        }
+        lines.push('');
+      });
+    }
+
+    // 중
+    if (imp.medium.length > 0) {
+      imp.medium.forEach(m => {
+        lines.push('### [중] ' + m.field);
+        if (m.items) {
+          m.items.forEach(it => {
+            if (typeof it === 'string') lines.push('  - ' + it);
+            else if (it.name && it.file_count !== undefined) lines.push('  - ' + it.name + ' (' + it.file_count + ' 파일)');
+            else lines.push('  - ' + JSON.stringify(it));
+          });
+        } else {
+          lines.push('  ' + JSON.stringify({added: m.added, removed: m.removed}));
+        }
+        lines.push('');
+      });
+    }
+
+    // 하
+    if (imp.low.length > 0) {
+      imp.low.forEach(l => {
+        lines.push('### [하] ' + l.field);
+        if (l.changes) {
+          Object.entries(l.changes).forEach(([k, v]) => {
+            lines.push('  - ' + k + ': ' + v.before + ' → ' + v.after + ' (' + (v.delta >= 0 ? '+' : '') + v.delta + ')');
+          });
+        } else if (l.before !== undefined) {
+          lines.push('  - ' + l.before + ' → ' + l.after);
+        }
+        lines.push('');
+      });
+    }
+
+    lines.push('---');
+    lines.push('요약: 상 ' + imp.high.length + '개, 중 ' + imp.medium.length + '개, 하 ' + imp.low.length + '개');
+
+    process.stdout.write(lines.join('\n'));
+  "
+}
+
+# ── Audit 리포트 파일 저장 ──
+# args: report_text output_path
+save_audit_report() {
+  local report="$1"
+  local path="$2"
+  mkdir -p "$(dirname "$path")"
+  printf '%s\n' "$report" > "$path"
+}

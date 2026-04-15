@@ -93,4 +93,41 @@ echo "$RESULT" | grep -q 'session_vars' \
   && pass "drift_importance: session_vars high로 분류" \
   || fail "drift_importance: session_vars 분류 안 됨 ($RESULT)"
 
+# ── render_audit_report: 마크다운 리포트 생성 ──
+DRIFT=$(compute_drift "$BEFORE" "$AFTER_MIXED")
+IMPORTANCE=$(drift_importance "$DRIFT")
+REPORT=$(render_audit_report "$DRIFT" "$IMPORTANCE" "2026-04-15T14:23:01+09:00" "EHR_HR50" "ehr5" "1.2.0" "1.3.0")
+
+# 필수 섹션 헤더
+echo "$REPORT" | grep -q "^## 프로젝트 Drift" \
+  && pass "render_audit_report: Drift 섹션 존재" \
+  || fail "render_audit_report: Drift 섹션 missing"
+
+echo "$REPORT" | grep -q '상\]' \
+  && pass "render_audit_report: [상] 라벨 존재" \
+  || fail "render_audit_report: [상] label missing"
+
+echo "$REPORT" | grep -q "ssnDeptCd" \
+  && pass "render_audit_report: ssnDeptCd 항목 포함" \
+  || fail "render_audit_report: ssnDeptCd missing"
+
+# 프로젝트 메타
+echo "$REPORT" | grep -q "EHR_HR50" \
+  && pass "render_audit_report: 시스템명 포함" \
+  || fail "render_audit_report: 시스템명 missing"
+
+echo "$REPORT" | grep -qE "1\\.2\\.0.*1\\.3\\.0" \
+  && pass "render_audit_report: 플러그인 버전 전환 표시" \
+  || fail "render_audit_report: 버전 전환 missing"
+
+# ── save_audit_report: 파일 쓰기 ──
+TMP_R="$(mktemp -d)"
+save_audit_report "$REPORT" "$TMP_R/report.md"
+[ -f "$TMP_R/report.md" ] && pass "save_audit_report: 파일 생성됨" \
+  || fail "save_audit_report: 파일 미생성"
+grep -q "^## 프로젝트 Drift" "$TMP_R/report.md" \
+  && pass "save_audit_report: 내용 저장됨" \
+  || fail "save_audit_report: 내용 누락"
+rm -rf "$TMP_R"
+
 echo "ALL DRIFT COMPUTE TESTS PASSED (Task 7)"
