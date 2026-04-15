@@ -9,7 +9,7 @@
 
 set -u
 
-HS_SCHEMA_VERSION=2
+HS_SCHEMA_VERSION=3
 
 # ── sha256 계산 (cross-platform) ──
 hs_sha256() {
@@ -137,7 +137,7 @@ hs_classify_file() {
 
 # ── 매니페스트 새로 작성 ──
 # args: manifest_path plugin_version profile sources_json outputs_json
-#       [generated_at] [auth_model_json] [db_verification_json] [ddl_authoring_json]
+#       [generated_at] [auth_model_json] [db_verification_json] [ddl_authoring_json] [analysis_json]
 hs_write_manifest() {
   local manifest_path="$1"
   local plugin_version="$2"
@@ -148,6 +148,7 @@ hs_write_manifest() {
   local auth_model_json="${7:-null}"
   local db_verification_json="${8:-null}"
   local ddl_authoring_json="${9:-null}"
+  local analysis_json="${10:-null}"
   local updated_at
   updated_at=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)
 
@@ -161,6 +162,7 @@ hs_write_manifest() {
   AUTH_JSON="$auth_model_json" \
   DBV_JSON="$db_verification_json" \
   DDL_JSON="$ddl_authoring_json" \
+  ANA_JSON="$analysis_json" \
   GEN="$generated_at" \
   UPD="$updated_at" \
   SV="$HS_SCHEMA_VERSION" \
@@ -183,6 +185,7 @@ hs_write_manifest() {
       auth_model: parse(process.env.AUTH_JSON, 'auth_model'),
       db_verification: parse(process.env.DBV_JSON, 'db_verification'),
       ddl_authoring: parse(process.env.DDL_JSON, 'ddl_authoring'),
+      analysis: parse(process.env.ANA_JSON, 'analysis'),
     };
     fs.writeFileSync(process.env.MFP, JSON.stringify(m, null, 2));
   "
@@ -219,5 +222,20 @@ hs_get_profile() {
       const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8'));
       process.stdout.write(m.profile||'');
     }catch(e){process.stdout.write('');}
+  "
+}
+
+# ── 매니페스트에서 analysis 객체 읽기 (없으면 문자열 "null") ──
+hs_get_analysis() {
+  local manifest_path="$1"
+  MFP="$manifest_path" node -e "
+    try{
+      const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8'));
+      if (m.analysis == null) {
+        process.stdout.write('null');
+      } else {
+        process.stdout.write(JSON.stringify(m.analysis));
+      }
+    }catch(e){process.stdout.write('null');}
   "
 }

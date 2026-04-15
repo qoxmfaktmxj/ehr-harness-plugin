@@ -42,14 +42,14 @@ sha_missing=$(hs_sha256 "$TMP/nope.txt")
 hs_is_legacy "$TMP/nope.json" && pass "legacy: missing file" || fail "legacy: missing file"
 echo "{}" > "$TMP/empty.json"
 hs_is_legacy "$TMP/empty.json" && pass "legacy: empty manifest" || fail "legacy: empty manifest"
-hs_is_legacy "$FIXTURES/harness-v2.json" && fail "legacy: stamped should NOT be legacy" || pass "legacy: stamped → not legacy"
+hs_is_legacy "$FIXTURES/harness-v3.json" && fail "legacy: stamped should NOT be legacy" || pass "legacy: stamped → not legacy"
 
 # ── 3. hs_get_output_sha / hs_get_source_sha ──
-out=$(hs_get_output_sha "$FIXTURES/harness-v2.json" ".claude/settings.json")
+out=$(hs_get_output_sha "$FIXTURES/harness-v3.json" ".claude/settings.json")
 [ "$out" = "sha256:aaa" ] && pass "get_output_sha" || fail "get_output_sha (got: $out)"
-src=$(hs_get_source_sha "$FIXTURES/harness-v2.json" "profiles/shared/settings.json")
+src=$(hs_get_source_sha "$FIXTURES/harness-v3.json" "profiles/shared/settings.json")
 [ "$src" = "sha256:111" ] && pass "get_source_sha" || fail "get_source_sha (got: $src)"
-miss=$(hs_get_output_sha "$FIXTURES/harness-v2.json" "nope")
+miss=$(hs_get_output_sha "$FIXTURES/harness-v3.json" "nope")
 [ -z "$miss" ] && pass "get_output_sha missing → empty" || fail "get_output_sha missing → empty"
 
 # ── 4. hs_classify_file ──
@@ -106,7 +106,7 @@ bucket=$(hs_classify_file "$TMP/manifest.json" "newsrc.txt" "$TMP/missing_src" "
 hs_write_manifest "$TMP/written.json" "1.2.3" "ehr5" '{"a":"sha256:1"}' '{"b":"sha256:2"}'
 [ -f "$TMP/written.json" ] && pass "write_manifest creates file" || fail "write_manifest creates file"
 sv=$(MFP="$TMP/written.json" node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).schema_version)")
-[ "$sv" = "2" ] && pass "write_manifest schema_version" || fail "write_manifest schema_version (got: $sv)"
+[ "$sv" = "3" ] && pass "write_manifest schema_version" || fail "write_manifest schema_version (got: $sv)"
 pv=$(MFP="$TMP/written.json" node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).plugin_version)")
 [ "$pv" = "1.2.3" ] && pass "write_manifest plugin_version" || fail "write_manifest plugin_version (got: $pv)"
 pf=$(MFP="$TMP/written.json" node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).profile)")
@@ -123,9 +123,9 @@ v_missing=$(hs_plugin_version "$TMP/no_such_plugin")
 [ "$v_missing" = "unknown" ] && pass "plugin_version missing → unknown" || fail "plugin_version missing → unknown (got: $v_missing)"
 
 # ── 7. hs_get_generated_at / hs_get_profile ──
-gen=$(hs_get_generated_at "$FIXTURES/harness-v2.json")
+gen=$(hs_get_generated_at "$FIXTURES/harness-v3.json")
 [ "$gen" = "2026-04-09T10:00:00+09:00" ] && pass "get_generated_at" || fail "get_generated_at (got: $gen)"
-prof=$(hs_get_profile "$FIXTURES/harness-v2.json")
+prof=$(hs_get_profile "$FIXTURES/harness-v3.json")
 [ "$prof" = "ehr5" ] && pass "get_profile" || fail "get_profile (got: $prof)"
 
 # ── hs_is_legacy: v1 매니페스트는 legacy 로 분류되어야 함 ──
@@ -140,15 +140,15 @@ else
 fi
 rm -rf "$TMP_V1"
 
-# ── hs_is_legacy: v2 매니페스트는 stamped 로 분류되어야 함 ──
+# ── hs_is_legacy: v2 매니페스트는 legacy 로 분류되어야 함 (v3 기준) ──
 TMP_V2="$(mktemp -d)"
 cat > "$TMP_V2/HARNESS.json" <<'EOF'
 {"schema_version": 2, "plugin_name": "ehr-harness"}
 EOF
 if hs_is_legacy "$TMP_V2/HARNESS.json"; then
-  fail "hs_is_legacy: schema_version=2 should be stamped (got legacy)"
+  pass "hs_is_legacy: schema_version=2 → legacy (below v3)"
 else
-  pass "hs_is_legacy: schema_version=2 → stamped"
+  fail "hs_is_legacy: schema_version=2 should be legacy when current is v3"
 fi
 rm -rf "$TMP_V2"
 
@@ -164,7 +164,7 @@ hs_write_manifest \
   '{"ddl_path":"src/main/resources/db/tables","db_access":"available","b3_strategy":"ddl-first"}' \
   '{"enabled":true,"table_path":"src/main/resources/db/tables","procedure_path":null,"function_path":null,"naming_pattern":"{OBJECT_NAME}.sql","header_template_path":null,"existing_tables":["THRM101"]}'
 WRITTEN=$(cat "$TMP_W/HARNESS.json")
-if echo "$WRITTEN" | grep -q '"schema_version": 2' && \
+if echo "$WRITTEN" | grep -q '"schema_version": 3' && \
    echo "$WRITTEN" | grep -q '"auth_service_class": "AuthTableService"' && \
    echo "$WRITTEN" | grep -q '"b3_strategy": "ddl-first"' && \
    echo "$WRITTEN" | grep -q '"enabled": true'; then
@@ -187,5 +187,96 @@ else
   fail "write_manifest: defaults should be null (got: $HAVE_NULL)"
 fi
 rm -rf "$TMP_D"
+
+# ── hs_is_legacy: v2 매니페스트는 legacy 로 분류되어야 함 (v3 bump 후) ──
+TMP_V2="$(mktemp -d)"
+cat > "$TMP_V2/HARNESS.json" <<'EOF'
+{"schema_version": 2, "plugin_name": "ehr-harness"}
+EOF
+if hs_is_legacy "$TMP_V2/HARNESS.json"; then
+  pass "hs_is_legacy: schema_version=2 → legacy (v3 bump)"
+else
+  fail "hs_is_legacy: schema_version=2 should be legacy after v3 bump"
+fi
+rm -rf "$TMP_V2"
+
+# ── hs_is_legacy: v3 매니페스트는 stamped 로 분류되어야 함 ──
+TMP_V3="$(mktemp -d)"
+cat > "$TMP_V3/HARNESS.json" <<'EOF'
+{"schema_version": 3, "plugin_name": "ehr-harness"}
+EOF
+if hs_is_legacy "$TMP_V3/HARNESS.json"; then
+  fail "hs_is_legacy: schema_version=3 should be stamped"
+else
+  pass "hs_is_legacy: schema_version=3 → stamped"
+fi
+rm -rf "$TMP_V3"
+
+# ── hs_write_manifest: analysis 필드 기록 (10-arg 버전) ──
+TMP_W3="$(mktemp -d)"
+hs_write_manifest \
+  "$TMP_W3/HARNESS.json" \
+  "1.3.0" \
+  "ehr5" \
+  '{}' '{}' \
+  "" \
+  '{"common_controllers":[],"auth_service_class":null,"auth_injection_methods":[],"auth_tables":[],"auth_functions":[],"session_vars":[]}' \
+  '{"ddl_path":null,"db_access":"unavailable","b3_strategy":"manual-required"}' \
+  '{"enabled":false,"table_path":null,"procedure_path":null,"function_path":null,"naming_pattern":null,"header_template_path":null,"existing_tables":[]}' \
+  '{"analyzed_at":"2026-04-15T14:23:01+09:00","module_map":[{"name":"hrm","file_count":120}],"session_vars":["ssnEnterCd"],"authSqlID":[],"law_counts":{"A_direct_controller":45,"B_getData":79,"B_saveData":68,"C_hybrid":12,"D_execPrc":15},"critical_proc_found":["P_CPN_CAL_PAY_MAIN"],"critical_proc_missing":[],"procedure_count":234,"procedure_sample":["P_CPN_CAL_PAY_MAIN"],"trigger_count":18}'
+WRITTEN=$(cat "$TMP_W3/HARNESS.json")
+if echo "$WRITTEN" | grep -q '"schema_version": 3' && \
+   echo "$WRITTEN" | grep -q '"analyzed_at":' && \
+   echo "$WRITTEN" | grep -q '"procedure_count": 234' && \
+   echo "$WRITTEN" | grep -q '"module_map":'; then
+  pass "hs_write_manifest: v3 analysis 필드 persisted"
+else
+  fail "hs_write_manifest: v3 analysis 필드 missing. Got: $WRITTEN"
+fi
+rm -rf "$TMP_W3"
+
+# ── hs_write_manifest: 9-arg 호출 시 analysis null (후방 호환) ──
+TMP_W9="$(mktemp -d)"
+hs_write_manifest \
+  "$TMP_W9/HARNESS.json" \
+  "1.3.0" \
+  "ehr5" \
+  '{}' '{}' \
+  "" \
+  'null' 'null' 'null'
+BACKCOMPAT=$(MFP="$TMP_W9/HARNESS.json" node -e "
+  const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8'));
+  console.log(m.analysis === null ? 'ok' : 'BAD');
+")
+if [ "$BACKCOMPAT" = "ok" ]; then
+  pass "hs_write_manifest: 9-arg 호출 시 analysis null (후방호환)"
+else
+  fail "hs_write_manifest: 9-arg backcompat broken (got: $BACKCOMPAT)"
+fi
+rm -rf "$TMP_W9"
+
+# ── hs_get_analysis: 매니페스트에서 analysis 조회 ──
+TMP_A="$(mktemp -d)"
+cat > "$TMP_A/HARNESS.json" <<'EOF'
+{"schema_version": 3, "analysis": {"module_map": [{"name":"hrm","file_count":120}], "session_vars": ["ssnEnterCd"]}}
+EOF
+RESULT=$(hs_get_analysis "$TMP_A/HARNESS.json")
+if echo "$RESULT" | grep -q '"name":"hrm"' && echo "$RESULT" | grep -q '"ssnEnterCd"'; then
+  pass "hs_get_analysis: JSON 객체 반환"
+else
+  fail "hs_get_analysis: unexpected output ($RESULT)"
+fi
+
+# ── hs_get_analysis: analysis 없을 때 null 반환 ──
+cat > "$TMP_A/NO_ANALYSIS.json" <<'EOF'
+{"schema_version": 3}
+EOF
+RESULT=$(hs_get_analysis "$TMP_A/NO_ANALYSIS.json")
+if [ "$RESULT" = "null" ]; then
+  pass "hs_get_analysis: 없을 때 null"
+else
+  fail "hs_get_analysis: should return null when missing (got: $RESULT)"
+fi
+rm -rf "$TMP_A"
 
 echo "ALL TESTS PASSED"
