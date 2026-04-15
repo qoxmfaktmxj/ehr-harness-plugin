@@ -101,3 +101,89 @@ detect_auth_model() {
 {"common_controllers":$common_json,"auth_service_class":$auth_service,"auth_injection_methods":$methods_json,"auth_tables":$auth_tables_json,"auth_functions":$auth_functions_json,"session_vars":$session_vars_json}
 EOF
 }
+
+# ── DDL 폴더 감별 ──
+# args: project_root
+# stdout: JSON {enabled, table_path, procedure_path, function_path, naming_pattern, header_template_path, existing_tables}
+detect_ddl_folder() {
+  local root="$1"
+  local candidates=(
+    "src/main/resources/db"
+    "src/main/resources/ddl"
+    "src/main/resources/sql"
+    "db"
+    "ddl"
+    "sql"
+    "database"
+    "schema"
+  )
+
+  local found_root=""
+  for c in "${candidates[@]}"; do
+    if [ -d "$root/$c" ]; then
+      # CREATE TABLE 하나라도 있으면 진짜 DDL 폴더로 인정
+      if grep -rqlE "CREATE[[:space:]]+(OR[[:space:]]+REPLACE[[:space:]]+)?TABLE" "$root/$c" 2>/dev/null; then
+        found_root="$root/$c"
+        break
+      fi
+    fi
+  done
+
+  if [ -z "$found_root" ]; then
+    echo '{"enabled":false,"table_path":null,"procedure_path":null,"function_path":null,"naming_pattern":null,"header_template_path":null,"existing_tables":[]}'
+    return 0
+  fi
+
+  # 서브구조 감별
+  local table_path="null" proc_path="null" func_path="null"
+  for tbl_sub in tables table tbl; do
+    if [ -d "$found_root/$tbl_sub" ]; then
+      table_path="\"$found_root/$tbl_sub\""
+      break
+    fi
+  done
+  if [ "$table_path" = "null" ]; then
+    table_path="\"$found_root\""
+  fi
+  for proc_sub in procedures procedure proc; do
+    if [ -d "$found_root/$proc_sub" ]; then
+      proc_path="\"$found_root/$proc_sub\""
+      break
+    fi
+  done
+  for fn_sub in functions function func; do
+    if [ -d "$found_root/$fn_sub" ]; then
+      func_path="\"$found_root/$fn_sub\""
+      break
+    fi
+  done
+
+  # 명명 규칙 샘플링 (테이블 파일 2~3개 이름 분석)
+  local sample_file
+  sample_file=$(find "${table_path//\"/}" -maxdepth 2 -name "*.sql" 2>/dev/null | head -1)
+  local naming_pattern="\"{OBJECT_NAME}.sql\""
+  if [ -n "$sample_file" ]; then
+    local fname
+    fname=$(basename "$sample_file")
+    # TBL_xxx.sql 패턴인가?
+    if echo "$fname" | grep -qE '^TBL_'; then
+      naming_pattern="\"TBL_{OBJECT_NAME}.sql\""
+    # YYYYMMDD_xxx.sql 패턴인가?
+    elif echo "$fname" | grep -qE '^[0-9]{8}_'; then
+      naming_pattern="\"YYYYMMDD_{OBJECT_NAME}.sql\""
+    fi
+  fi
+
+  # 기존 테이블 이름 세트
+  local existing=()
+  while IFS= read -r tbl; do
+    [ -n "$tbl" ] && existing+=("\"$tbl\"")
+  done < <(grep -rhoE "CREATE[[:space:]]+(OR[[:space:]]+REPLACE[[:space:]]+)?TABLE[[:space:]]+[A-Z][A-Z0-9_]+" "${table_path//\"/}" 2>/dev/null \
+             | sed -E 's/CREATE[[:space:]]+(OR[[:space:]]+REPLACE[[:space:]]+)?TABLE[[:space:]]+//' | sort -u)
+  local existing_json
+  existing_json=$(IFS=,; echo "[${existing[*]:-}]")
+
+  cat <<EOF
+{"enabled":true,"table_path":$table_path,"procedure_path":$proc_path,"function_path":$func_path,"naming_pattern":$naming_pattern,"header_template_path":null,"existing_tables":$existing_json}
+EOF
+}

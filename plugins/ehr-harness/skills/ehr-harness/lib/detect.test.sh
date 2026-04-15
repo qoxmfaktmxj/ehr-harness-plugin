@@ -105,4 +105,60 @@ echo "$RESULT" | grep -q '"auth_service_class":"AuthService"' \
   && pass "auth_model alt_service: AuthService 감지 (대체 이름)" \
   || fail "auth_model alt_service: AuthService not detected ($RESULT)"
 
+# ═══════════════════════════════════════════════
+#   DDL 폴더 감별 테스트
+# ═══════════════════════════════════════════════
+
+# ── ddl_folder/present: 기본 경로 감지 ──
+RESULT=$(detect_ddl_folder "$FX/ddl_folder/present")
+echo "$RESULT" | grep -q '"enabled":true' \
+  && pass "ddl_folder present: enabled=true" \
+  || fail "ddl_folder present: not enabled ($RESULT)"
+echo "$RESULT" | grep -q '"table_path":".*db/tables"' \
+  && pass "ddl_folder present: table_path 감지" \
+  || fail "ddl_folder present: table_path missing ($RESULT)"
+echo "$RESULT" | grep -q '"THRM101"' \
+  && pass "ddl_folder present: existing_tables에 THRM101" \
+  || fail "ddl_folder present: existing_tables ($RESULT)"
+echo "$RESULT" | grep -q '"THRM102"' \
+  && pass "ddl_folder present: existing_tables에 THRM102" \
+  || fail "ddl_folder present: existing_tables missing THRM102 ($RESULT)"
+
+# ── ddl_folder/absent: 폴더 없음 ──
+RESULT=$(detect_ddl_folder "$FX/ddl_folder/absent")
+echo "$RESULT" | grep -q '"enabled":false' \
+  && pass "ddl_folder absent: enabled=false" \
+  || fail "ddl_folder absent: should be disabled ($RESULT)"
+echo "$RESULT" | grep -q '"existing_tables":\[\]' \
+  && pass "ddl_folder absent: existing_tables 빈 배열" \
+  || fail "ddl_folder absent: existing_tables should be empty ($RESULT)"
+
+# ── ddl_folder/tbl_prefix: TBL_ prefix 명명 규칙 ──
+RESULT=$(detect_ddl_folder "$FX/ddl_folder/tbl_prefix")
+echo "$RESULT" | grep -q '"naming_pattern":"TBL_{OBJECT_NAME}.sql"' \
+  && pass "ddl_folder tbl_prefix: naming_pattern 추출" \
+  || fail "ddl_folder tbl_prefix: naming_pattern missing ($RESULT)"
+echo "$RESULT" | grep -q '"TCODE"' \
+  && pass "ddl_folder tbl_prefix: existing_tables에 TCODE" \
+  || fail "ddl_folder tbl_prefix: TCODE missing ($RESULT)"
+
+# ── JSON 유효성 (present fixture) ──
+RESULT=$(detect_ddl_folder "$FX/ddl_folder/present")
+echo "$RESULT" | node -e "
+  let s='';process.stdin.on('data',d=>s+=d);
+  process.stdin.on('end',()=>{
+    try{const m=JSON.parse(s);
+      if(typeof m!=='object'||m===null)throw new Error('not object');
+      ['enabled','table_path','procedure_path','function_path','naming_pattern','header_template_path','existing_tables'].forEach(k=>{
+        if(!(k in m))throw new Error('missing key: '+k);
+      });
+      if(!Array.isArray(m.existing_tables))throw new Error('existing_tables not array');
+      process.exit(0);
+    }catch(e){console.error(e.message);process.exit(1);}
+  });
+" >/dev/null 2>&1 \
+  && pass "ddl_folder present: JSON 유효 + 필수 키 전부 존재" \
+  || fail "ddl_folder present: JSON 파싱 실패 또는 키 누락 ($RESULT)"
+
+echo "ALL DDL_FOLDER DETECTION TESTS PASSED"
 echo "ALL AUTH_MODEL DETECTION TESTS PASSED"
