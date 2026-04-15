@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapper namespace="tim.work">
+  <update id="prcWorkHourChg">
+    CALL P_TIM_WORK_HOUR_CHG(#{enterCd}, #{sqlCode, mode=OUT})
+  </update>
+  <update id="updAudit">
+    TRG_TIM_405 fires on update
+  </update>
+</mapper>

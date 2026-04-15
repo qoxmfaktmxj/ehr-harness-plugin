@@ -89,4 +89,38 @@ echo "$RESULT" | node -e "
   && pass "collect_law_counts: JSON 객체 유효" \
   || fail "collect_law_counts: JSON 실패 ($RESULT)"
 
+# ── collect_critical_proc: found 배열 ──
+RESULT=$(collect_critical_proc "$FX/analysis/project_hr50" "ehr5")
+for p in P_CPN_CAL_PAY_MAIN P_HRI_AFTER_PROC_EXEC P_HRI_APP_PATH_INS_AUTO_ALL P_TIM_WORK_HOUR_CHG; do
+  echo "$RESULT" | grep -q "\"$p\"" \
+    && pass "collect_critical_proc: $p found" \
+    || fail "collect_critical_proc: $p missing ($RESULT)"
+done
+
+# ── JSON 유효성 (found + missing 배열) ──
+echo "$RESULT" | node -e "
+  let s='';process.stdin.on('data',d=>s+=d);
+  process.stdin.on('end',()=>{
+    try{const m=JSON.parse(s);
+      if(!Array.isArray(m.found)||!Array.isArray(m.missing))throw new Error('shape');
+      process.exit(0);
+    }catch(e){console.error(e.message);process.exit(1);}
+  });
+" >/dev/null 2>&1 \
+  && pass "collect_critical_proc: JSON {found, missing} 유효" \
+  || fail "collect_critical_proc: JSON 실패 ($RESULT)"
+
+# ── collect_procedure_summary: count + sample ──
+RESULT=$(collect_procedure_summary "$FX/analysis/project_hr50" "ehr5")
+# 프로시저 4개 (P_CPN_CAL_PAY_MAIN, P_HRI_AFTER_PROC_EXEC, P_HRI_APP_PATH_INS_AUTO_ALL, P_TIM_WORK_HOUR_CHG) + 트리거 1개 (TRG_TIM_405)
+echo "$RESULT" | grep -q '"procedure_count":4' \
+  && pass "collect_procedure_summary: procedure_count=4" \
+  || fail "collect_procedure_summary: procedure_count expected 4 ($RESULT)"
+echo "$RESULT" | grep -q '"trigger_count":1' \
+  && pass "collect_procedure_summary: trigger_count=1" \
+  || fail "collect_procedure_summary: trigger_count expected 1 ($RESULT)"
+echo "$RESULT" | grep -q '"procedure_sample"' \
+  && pass "collect_procedure_summary: procedure_sample 존재" \
+  || fail "collect_procedure_summary: procedure_sample missing ($RESULT)"
+
 echo "ALL ANALYZE TESTS PASSED (Task 3)"

@@ -156,3 +156,78 @@ collect_law_counts() {
 {"A_direct_controller":$a_direct,"B_getData":$b_get,"B_saveData":$b_save,"C_hybrid":$c_hyb,"D_execPrc":$d_exec}
 EOF
 }
+
+# ── 치명 프로시저 존재 확인 ──
+# args: project_root profile
+# stdout: JSON 객체 {found: [...], missing: [...]}
+collect_critical_proc() {
+  local root="$1"
+  local profile="${2:-ehr4}"
+  local mapper_ext
+  mapper_ext=$(_mapper_ext "$profile")
+
+  # 치명 프로시저 고정 목록
+  local critical_list=(
+    P_CPN_CAL_PAY_MAIN
+    P_CPN_SMPPYM_EMP
+    P_CPN_ORIGIN_TAX_INS
+    P_HRM_POST
+    P_HRM_POST_DETAIL
+    P_TIM_WORK_HOUR_CHG
+    P_HRI_AFTER_PROC_EXEC
+    P_HRI_APP_PATH_INS_AUTO_ALL
+    P_TIM_VACATION_CLEAN
+    P_TIM_ANNUAL_CREATE
+  )
+
+  local found=()
+  local missing=()
+  for proc in "${critical_list[@]}"; do
+    if grep -rqlE "\b${proc}\b" --include="$mapper_ext" --include="*.xml" "$root" 2>/dev/null; then
+      found+=("\"$proc\"")
+    else
+      missing+=("\"$proc\"")
+    fi
+  done
+
+  local found_json
+  found_json=$(IFS=,; echo "${found[*]:-}")
+  local missing_json
+  missing_json=$(IFS=,; echo "${missing[*]:-}")
+
+  echo "{\"found\":[$found_json],\"missing\":[$missing_json]}"
+}
+
+# ── 전체 프로시저/트리거 요약 ──
+# args: project_root profile
+# stdout: JSON 객체 {procedure_count, procedure_sample, trigger_count}
+collect_procedure_summary() {
+  local root="$1"
+  local profile="${2:-ehr4}"
+  local mapper_ext
+  mapper_ext=$(_mapper_ext "$profile")
+
+  # 모든 P_/PKG_ 호출 추출
+  local all_procs
+  all_procs=$(grep -rhoE "\b(P_[A-Z][A-Z0-9_]+|PKG_[A-Z][A-Z0-9_]+)\b" --include="$mapper_ext" --include="*.xml" "$root" 2>/dev/null | sort -u)
+
+  local proc_count
+  proc_count=$(echo "$all_procs" | grep -c . || echo 0)
+  [ -z "$proc_count" ] && proc_count=0
+
+  # 상위 20개 샘플
+  local sample=()
+  while IFS= read -r p; do
+    [ -n "$p" ] && sample+=("\"$p\"")
+  done < <(echo "$all_procs" | head -20)
+
+  local sample_json
+  sample_json=$(IFS=,; echo "${sample[*]:-}")
+
+  # 트리거 카운트 (TRG_)
+  local trig_count
+  trig_count=$(grep -rhoE "\bTRG_[A-Z][A-Z0-9_]+\b" --include="$mapper_ext" --include="*.xml" --include="*.java" "$root" 2>/dev/null | sort -u | grep -c . || echo 0)
+  [ -z "$trig_count" ] && trig_count=0
+
+  echo "{\"procedure_count\":$proc_count,\"procedure_sample\":[$sample_json],\"trigger_count\":$trig_count}"
+}
