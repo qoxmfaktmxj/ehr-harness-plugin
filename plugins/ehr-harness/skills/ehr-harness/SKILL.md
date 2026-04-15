@@ -1,6 +1,6 @@
 ---
 name: ehr-harness
-description: "EHR 프로젝트 하네스 자동 생성 메타 스킬. '하네스 만들어줘', '하네스 생성해줘', '하네스 설계해줘', '하네스 구성해줘', '하네스 구축해줘', '하네스 업데이트', '하네스 재생성', '하네스 수정', '하네스 갱신', '이수하네스', 'ehr하네스', 'EHR하네스', 'e-hr하네스', 'E-HR하네스', '인사시스템 하네스', '인사하네스' 등의 키워드에 트리거."
+description: "EHR 프로젝트 하네스 자동 생성 + audit 메타 스킬. '하네스 만들어줘', '하네스 생성해줘', '하네스 설계해줘', '하네스 구성해줘', '하네스 구축해줘', '하네스 업데이트', '하네스 재생성', '하네스 수정', '하네스 갱신', '하네스 점검해줘', '하네스 audit', '하네스 drift 체크', '/harness-audit', '이수하네스', 'ehr하네스', 'EHR하네스', 'e-hr하네스', 'E-HR하네스', '인사시스템 하네스', '인사하네스' 등의 키워드에 트리거."
 ---
 
 # EHR Harness Generator
@@ -123,13 +123,19 @@ if [ -f "AGENTS.md" ] || ls .claude/skills/ehr-* >/dev/null 2>&1; then
   HAS_HARNESS_TRACE=1
 fi
 
+# USER_TRIGGER_IS_AUDIT 는 사용자 입력에서 "점검", "audit", "drift" 키워드가 감지됐을 때 설정된다.
+# (아직 SKILL.md 진입부에 판정 로직을 추가하지 않은 경우 기본값 0)
+USER_TRIGGER_IS_AUDIT="${USER_TRIGGER_IS_AUDIT:-0}"
+
 if [ ! -f "$MANIFEST" ] && [ "$HAS_HARNESS_TRACE" = "0" ]; then
   HARNESS_MODE="fresh"
 elif [ ! -f "$MANIFEST" ] && [ "$HAS_HARNESS_TRACE" = "1" ]; then
   HARNESS_MODE="legacy"
 elif hs_is_legacy "$MANIFEST"; then
-  # 매니페스트 파일은 있으나 schema_version 없거나 현재 버전(2)과 다름 → legacy 와 동일 취급
+  # 매니페스트 파일은 있으나 schema_version 없거나 현재 버전(3)과 다름 → legacy 와 동일 취급
   HARNESS_MODE="legacy"
+elif [ "$USER_TRIGGER_IS_AUDIT" = "1" ]; then
+  HARNESS_MODE="audit"
 else
   HARNESS_MODE="stamped"
 fi
@@ -160,6 +166,17 @@ echo "HARNESS_MODE=$HARNESS_MODE"
 ### Step 0.7-B: 업데이트 모드 분기
 
 `stamped` 인 경우, Step 1 ~ Step 2 를 정상적으로 수행한 뒤 (모듈 맵/치명 프로시저 등 분석 결과는 항상 최신화 필요), **Step 3 직전에 diff 를 계산하고 사용자 확인을 받는다**. 자세한 절차는 Step 3-PRE 에서 정의한다.
+
+### Step 0.7-C: audit 모드 분기
+
+사용자 입력에 "점검", "audit", "drift 체크", "/harness-audit" 같은 키워드가 포함된 경우 `HARNESS_MODE=audit`로 설정한다.
+
+- 진입 조건: 매니페스트 존재 + schema_version==3 + 사용자 명시 audit 트리거
+- 매니페스트가 없으면 "audit 불가, 먼저 하네스 설치 필요" 안내 후 종료
+- audit 모드는 Step 1 ~ Step 2 를 그대로 수행하고, **Step AUDIT-REPORT 에서 drift 계산 + 사용자 확인**을 진행한다
+- audit 결과 승인되면 Step 3 로 진입해 승인된 파일만 Write 한다 (stamped 와 동일한 should_write 가드 적용)
+
+자세한 절차는 Step AUDIT-REPORT 에서 정의한다.
 
 ---
 
