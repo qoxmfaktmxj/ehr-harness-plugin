@@ -74,4 +74,66 @@ mode=$(classify_mode "$TMP_SKILLS")
 [ "$mode" = "legacy" ] && pass "scenario legacy: skills only" || fail "scenario legacy: skills only (got: $mode)"
 rm -rf "$TMP_SKILLS"
 
+# ══════════════════════════════════════════════
+# Audit 시나리오 (Task 13)
+# ══════════════════════════════════════════════
+source "$SCRIPT_DIR/audit.sh" 2>/dev/null || fail "audit.sh load 실패"
+
+# ── scenario_audit_clean: drift 없음 ──
+BEFORE=$(hs_get_analysis "$FX/scenario_audit_clean/HARNESS.json")
+AFTER=$(cat "$FX/scenario_audit_clean/new_analysis.json")
+DRIFT=$(compute_drift "$BEFORE" "$AFTER")
+IMP=$(drift_importance "$DRIFT")
+echo "$IMP" | node -e "
+  let s='';process.stdin.on('data',d=>s+=d);
+  process.stdin.on('end',()=>{const m=JSON.parse(s);
+    if(m.high.length!==0||m.medium.length!==0||m.low.length!==0){console.error('unexpected drift: '+s);process.exit(1);}
+    process.exit(0);
+  });
+" >/dev/null 2>&1 \
+  && pass "scenario audit_clean: drift 없음" \
+  || fail "scenario audit_clean: drift 감지됨"
+
+# ── scenario_audit_drift_high: 상급 drift ──
+BEFORE=$(hs_get_analysis "$FX/scenario_audit_drift_high/HARNESS.json")
+AFTER=$(cat "$FX/scenario_audit_drift_high/new_analysis.json")
+DRIFT=$(compute_drift "$BEFORE" "$AFTER")
+IMP=$(drift_importance "$DRIFT")
+HIGH_COUNT=$(echo "$IMP" | node -e "
+  let s='';process.stdin.on('data',d=>s+=d);
+  process.stdin.on('end',()=>{const m=JSON.parse(s);process.stdout.write(String(m.high.length));});
+")
+[ "$HIGH_COUNT" -ge 2 ] \
+  && pass "scenario audit_drift_high: 상급 drift 2개 이상 ($HIGH_COUNT)" \
+  || fail "scenario audit_drift_high: 상급 drift 부족 ($HIGH_COUNT)"
+
+# ── scenario_audit_drift_medium: 중급 drift ──
+BEFORE=$(hs_get_analysis "$FX/scenario_audit_drift_medium/HARNESS.json")
+AFTER=$(cat "$FX/scenario_audit_drift_medium/new_analysis.json")
+DRIFT=$(compute_drift "$BEFORE" "$AFTER")
+IMP=$(drift_importance "$DRIFT")
+MED_COUNT=$(echo "$IMP" | node -e "
+  let s='';process.stdin.on('data',d=>s+=d);
+  process.stdin.on('end',()=>{const m=JSON.parse(s);process.stdout.write(String(m.medium.length));});
+")
+[ "$MED_COUNT" -ge 1 ] \
+  && pass "scenario audit_drift_medium: 중급 drift 1개 이상 ($MED_COUNT)" \
+  || fail "scenario audit_drift_medium: 중급 drift 부족 ($MED_COUNT)"
+
+# ── scenario_audit_drift_mixed: 상+중+하 혼합 ──
+BEFORE=$(hs_get_analysis "$FX/scenario_audit_drift_mixed/HARNESS.json")
+AFTER=$(cat "$FX/scenario_audit_drift_mixed/new_analysis.json")
+DRIFT=$(compute_drift "$BEFORE" "$AFTER")
+IMP=$(drift_importance "$DRIFT")
+ALL_COUNT=$(echo "$IMP" | node -e "
+  let s='';process.stdin.on('data',d=>s+=d);
+  process.stdin.on('end',()=>{const m=JSON.parse(s);
+    process.stdout.write(String(m.high.length)+' '+String(m.medium.length)+' '+String(m.low.length));
+  });
+")
+read -r H M L <<< "$ALL_COUNT"
+[ "$H" -ge 1 ] && [ "$M" -ge 1 ] && [ "$L" -ge 1 ] \
+  && pass "scenario audit_drift_mixed: 상/중/하 각 1개 이상 ($H/$M/$L)" \
+  || fail "scenario audit_drift_mixed: 각 1개 이상 필요 ($H/$M/$L)"
+
 echo "ALL SCENARIO TESTS PASSED"

@@ -1,0 +1,12 @@
+{
+  "analyzed_at": "2026-04-15T14:23:01+09:00",
+  "module_map": [{"name":"hrm","file_count":120}],
+  "session_vars": ["ssnEnterCd","ssnSabun"],
+  "authSqlID": ["THRM151"],
+  "law_counts": {"A_direct_controller":45,"B_getData":79,"B_saveData":68,"C_hybrid":12,"D_execPrc":15},
+  "critical_proc_found": ["P_CPN_CAL_PAY_MAIN"],
+  "critical_proc_missing": [],
+  "procedure_count": 234,
+  "procedure_sample": ["P_CPN_CAL_PAY_MAIN"],
+  "trigger_count": 18
+}
