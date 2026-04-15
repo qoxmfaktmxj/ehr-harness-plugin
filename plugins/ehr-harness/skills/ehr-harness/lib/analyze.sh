@@ -98,7 +98,10 @@ collect_authSqlID() {
   local ids=()
   while IFS= read -r id; do
     [ -n "$id" ] && ids+=("\"$id\"")
-  done < <(grep -rhoE 'authSqlID["'\''[:space:]=]*"[A-Z]{4}[0-9]{3}"' --include="*.java" --include="*.jsp" "$root" 2>/dev/null \
+  # 실제 EHR5 는 `paramMap.put("authSqlID", "THRM151")` 처럼 쉼표/탭이 끼어든다.
+  # 기존 legacy 는 `authSqlID="TCPN201"` 형태. 두 경우를 모두 잡기 위해
+  # authSqlID 뒤 비식별자 1~15자 (공백/쉼표/탭/=/") 이후의 따옴표 ID 를 매칭.
+  done < <(grep -rhoE 'authSqlID[^A-Za-z0-9_]{1,15}"[A-Z]{4}[0-9]{3}"' --include="*.java" --include="*.jsp" "$root" 2>/dev/null \
              | grep -oE '"[A-Z]{4}[0-9]{3}"' | sed 's/^"//;s/"$//' | sort -u)
 
   local joined
