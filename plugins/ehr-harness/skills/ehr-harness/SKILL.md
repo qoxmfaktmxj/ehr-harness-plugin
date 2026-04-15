@@ -1091,6 +1091,22 @@ Read: $PLUGIN_ROOT/profiles/shared/.gitignore
 Write: .gitignore (프로젝트에 .gitignore가 이미 있으면 내용 병합)
 ```
 
+#### 3-B-pre. AGENTS.md 치환값 준비
+
+```bash
+# AUTH_MODEL_MD 는 Step 2-M 에서 이미 생성됨.
+# DB_VERIFICATION_MD 는 여기서 생성한다.
+
+DB_VERIFICATION_MD=$(DBV="$DB_VERIFICATION_JSON" node -e "
+  const m=JSON.parse(process.env.DBV);
+  console.log('| 항목 | 값 |');
+  console.log('|------|-----|');
+  console.log('| DDL 경로 | ' + (m.ddl_path || '_(없음)_') + ' |');
+  console.log('| DB 접속 | ' + m.db_access + ' |');
+  console.log('| B3 전략 | ' + m.b3_strategy + ' |');
+")
+```
+
 ### 3-B. 문서 (skeleton/ + 실측값 → 프로젝트 루트)
 
 ```
@@ -1101,8 +1117,10 @@ Read: $PLUGIN_ROOT/profiles/$PROFILE/skeleton/AGENTS.md.skel
   {{SESSION_VARS}} → Step 2-D 수집 결과
   {{CRITICAL_PROC}} → Step 2-G 확인된 치명 프로시저 (마크다운 테이블)
   {{LAW_C_COUNT}} → Step 2-C AuthTableService 카운트
+  {{AUTH_MODEL}} → Step 2-M 생성한 AUTH_MODEL_MD (마크다운 테이블)
+  {{DB_VERIFICATION}} → Step 2-J-6 결과 + Step 3-B-pre 생성한 DB_VERIFICATION_MD (마크다운 블록)
 Write: AGENTS.md
-크기 확인: 150줄 초과 시 상세를 스킬로 이동
+크기 확인: 200줄 초과 시 상세를 스킬로 이동 (권한 모델/DB 검증 섹션이 추가돼 기존보다 길어짐)
 ```
 
 ```
