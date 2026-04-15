@@ -879,11 +879,9 @@ $1|$2|$3|$4"
   fi
 
   # 에이전트
-  add "profiles/$PROFILE/agents/screen-builder.md"   "$PLUGIN_ROOT/profiles/$PROFILE/agents/screen-builder.md"   ".claude/agents/screen-builder.md"   ".claude/agents/screen-builder.md"
-  add "profiles/$PROFILE/agents/procedure-tracer.md" "$PLUGIN_ROOT/profiles/$PROFILE/agents/procedure-tracer.md" ".claude/agents/procedure-tracer.md" ".claude/agents/procedure-tracer.md"
-  if [ "$PROFILE" = "ehr4" ]; then
-    add "profiles/$PROFILE/agents/release-reviewer.md" "$PLUGIN_ROOT/profiles/$PROFILE/agents/release-reviewer.md" ".claude/agents/release-reviewer.md" ".claude/agents/release-reviewer.md"
-  fi
+  add "profiles/$PROFILE/agents/screen-builder.md"    "$PLUGIN_ROOT/profiles/$PROFILE/agents/screen-builder.md"    ".claude/agents/screen-builder.md"    ".claude/agents/screen-builder.md"
+  add "profiles/$PROFILE/agents/procedure-tracer.md"  "$PLUGIN_ROOT/profiles/$PROFILE/agents/procedure-tracer.md"  ".claude/agents/procedure-tracer.md"  ".claude/agents/procedure-tracer.md"
+  add "profiles/$PROFILE/agents/release-reviewer.md"  "$PLUGIN_ROOT/profiles/$PROFILE/agents/release-reviewer.md"  ".claude/agents/release-reviewer.md"  ".claude/agents/release-reviewer.md"
 }
 
 build_source_map
@@ -1197,11 +1195,9 @@ Write: .claude/agents/screen-builder.md
 Read: $PLUGIN_ROOT/profiles/$PROFILE/agents/procedure-tracer.md
 Write: .claude/agents/procedure-tracer.md
 
-# EHR4 전용
-if [ "$PROFILE" = "ehr4" ]; then
-  Read: $PLUGIN_ROOT/profiles/$PROFILE/agents/release-reviewer.md
-  Write: .claude/agents/release-reviewer.md
-fi
+# EHR4/EHR5 공통 — release-reviewer (EHR5도 신규 추가됨, 조건 분기 제거)
+Read: $PLUGIN_ROOT/profiles/$PROFILE/agents/release-reviewer.md
+Write: .claude/agents/release-reviewer.md
 ```
 
 ### 3-E. Codex/Gemini 호환
@@ -1531,7 +1527,7 @@ if [ -z "$GEN_AT" ]; then
   GEN_AT=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)
 fi
 
-hs_write_manifest "$MANIFEST" "$PLUGIN_VERSION" "$PROFILE" "$SOURCES_JSON" "$OUTPUTS_JSON" "$GEN_AT"
+hs_write_manifest "$MANIFEST" "$PLUGIN_VERSION" "$PROFILE" "$SOURCES_JSON" "$OUTPUTS_JSON" "$GEN_AT" "$AUTH_MODEL_JSON" "$DB_VERIFICATION_JSON" "$DDL_AUTH_JSON"
 
 echo "✓ HARNESS.json 갱신: plugin_version=$PLUGIN_VERSION, profile=$PROFILE"
 ```
