@@ -61,4 +61,36 @@ echo "$RESULT" | node -e "
   && pass "compute_drift: procedure_count 노이즈 필터 (+4 <5)" \
   || fail "compute_drift: procedure_count 필터 실패 ($RESULT)"
 
+# ── drift_importance: 상/중/하 분류 ──
+DRIFT=$(compute_drift "$BEFORE" "$AFTER_MIXED")
+RESULT=$(drift_importance "$DRIFT")
+
+# high: session_vars.added, critical_proc_found.added
+echo "$RESULT" | grep -q '"high"' \
+  && pass "drift_importance: high 카테고리 존재" \
+  || fail "drift_importance: high missing ($RESULT)"
+
+# medium: module_map.added
+echo "$RESULT" | grep -q '"medium"' \
+  && pass "drift_importance: medium 카테고리 존재" \
+  || fail "drift_importance: medium missing ($RESULT)"
+
+# JSON 유효성
+echo "$RESULT" | node -e "
+  let s='';process.stdin.on('data',d=>s+=d);
+  process.stdin.on('end',()=>{try{const m=JSON.parse(s);
+    if(!Array.isArray(m.high))throw new Error('high not array');
+    if(!Array.isArray(m.medium))throw new Error('medium not array');
+    if(!Array.isArray(m.low))throw new Error('low not array');
+    process.exit(0);
+  }catch(e){console.error(e.message);process.exit(1);}});
+" >/dev/null 2>&1 \
+  && pass "drift_importance: {high, medium, low} 배열 구조" \
+  || fail "drift_importance: 구조 실패 ($RESULT)"
+
+# high 배열에 session_vars 항목
+echo "$RESULT" | grep -q 'session_vars' \
+  && pass "drift_importance: session_vars high로 분류" \
+  || fail "drift_importance: session_vars 분류 안 됨 ($RESULT)"
+
 echo "ALL DRIFT COMPUTE TESTS PASSED (Task 7)"

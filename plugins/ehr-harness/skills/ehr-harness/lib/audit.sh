@@ -82,3 +82,55 @@ compute_drift() {
     process.stdout.write(JSON.stringify(drift));
   "
 }
+
+# ── Drift 중요도 분류 ──
+# args: drift_json
+# stdout: JSON 객체 {high: [{field, detail}], medium: [...], low: [...]}
+drift_importance() {
+  local drift="$1"
+
+  DRIFT="$drift" node -e "
+    const d = JSON.parse(process.env.DRIFT);
+    const high = [];
+    const medium = [];
+    const low = [];
+
+    // 상급 — session_vars, critical_proc_found.added
+    if (d.session_vars.added.length > 0) {
+      high.push({ field: 'session_vars.added', items: d.session_vars.added });
+    }
+    if (d.session_vars.removed.length > 0) {
+      high.push({ field: 'session_vars.removed', items: d.session_vars.removed });
+    }
+    if (d.critical_proc_found.added.length > 0) {
+      high.push({ field: 'critical_proc_found.added', items: d.critical_proc_found.added });
+    }
+
+    // 중급 — module_map, authSqlID
+    if (d.module_map.added.length > 0) {
+      medium.push({ field: 'module_map.added', items: d.module_map.added });
+    }
+    if (d.module_map.removed.length > 0) {
+      medium.push({ field: 'module_map.removed', items: d.module_map.removed });
+    }
+    if (d.module_map.changed.length > 0) {
+      medium.push({ field: 'module_map.changed', items: d.module_map.changed });
+    }
+    if (d.authSqlID.added.length > 0 || d.authSqlID.removed.length > 0) {
+      medium.push({ field: 'authSqlID', added: d.authSqlID.added, removed: d.authSqlID.removed });
+    }
+
+    // 하급 — law_counts, procedure_count, trigger_count
+    if (Object.keys(d.law_counts).length > 0) {
+      low.push({ field: 'law_counts', changes: d.law_counts });
+    }
+    if (d.procedure_count && d.procedure_count.changed) {
+      low.push({ field: 'procedure_count', before: d.procedure_count.before, after: d.procedure_count.after });
+    }
+    if (d.trigger_count && d.trigger_count.changed) {
+      low.push({ field: 'trigger_count', before: d.trigger_count.before, after: d.trigger_count.after });
+    }
+
+    process.stdout.write(JSON.stringify({ high, medium, low }));
+  "
+}
