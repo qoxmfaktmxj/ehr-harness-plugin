@@ -3,13 +3,13 @@
 `.claude/HARNESS.json` 은 ehr-harness 메타 스킬이 생성한 하네스의 상태 매니페스트다.
 업데이트 모드가 이 파일을 읽고 비교해 변경분을 산출한다.
 
-## Schema (version 2)
+## Schema (version 3)
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "plugin_name": "ehr-harness",
-  "plugin_version": "1.1.0",
+  "plugin_version": "1.3.0",
   "profile": "ehr5",
   "generated_at": "2026-04-15T12:34:56+09:00",
   "updated_at": "2026-04-15T12:34:56+09:00",
@@ -42,6 +42,35 @@
     "naming_pattern": "{OBJECT_NAME}.sql",
     "header_template_path": "src/main/resources/db/_template.sql",
     "existing_tables": ["THRM101", "THRM151_AUTH"]
+  },
+  "analysis": {
+    "analyzed_at": "2026-04-15T14:23:01+09:00",
+    "module_map": [
+      { "name": "hrm", "file_count": 120 },
+      { "name": "cpn", "file_count": 95 }
+    ],
+    "session_vars": ["ssnEnterCd", "ssnSabun", "ssnSearchType"],
+    "authSqlID": ["THRM151", "TORG101"],
+    "law_counts": {
+      "A_direct_controller": 45,
+      "B_getData": 79,
+      "B_saveData": 68,
+      "C_hybrid": 12,
+      "D_execPrc": 15
+    },
+    "critical_proc_found": [
+      "P_CPN_CAL_PAY_MAIN",
+      "P_HRM_POST",
+      "P_HRI_AFTER_PROC_EXEC"
+    ],
+    "critical_proc_missing": ["P_TIM_WORK_HOUR_CHG"],
+    "procedure_count": 234,
+    "procedure_sample": [
+      "P_CPN_CAL_PAY_MAIN",
+      "P_HRI_AFTER_PROC_EXEC",
+      "PKG_CPN_SEP"
+    ],
+    "trigger_count": 18
   }
 }
 ```
@@ -81,11 +110,30 @@
 | `header_template_path` | 기존 DDL의 헤더 주석 템플릿. 없으면 `null`. |
 | `existing_tables` | 중복 방지용 기존 테이블 이름 세트. |
 
+### `analysis` (v3 신규)
+
+프로젝트 심층 분석 결과 스냅샷. audit 모드가 drift 계산의 기준점으로 사용.
+
+| 필드 | 설명 |
+|------|------|
+| `analyzed_at` | 이 스냅샷이 생성된 시각 (ISO 8601). audit 리포트에 "N일 전 분석" 표시용. |
+| `module_map` | `{name, file_count}` 배열. 모듈 추가/삭제/크기 변화 감지. |
+| `session_vars` | 감지된 세션 변수 배열. 권한 모델 변화 감지. |
+| `authSqlID` | 권한 쿼리 매퍼 ID 배열. |
+| `law_counts` | 법칙 A/B/C/D별 카운트 객체. 절대값 5 이상 OR 10% 이상 변화시 drift 보고. |
+| `critical_proc_found` | 코드에서 호출 확인된 치명 프로시저. 추가 시 상급 drift (reviewer 체크 영향). |
+| `critical_proc_missing` | 고정 목록에 있지만 코드에 없는 것. 참고용. |
+| `procedure_count` | 전체 프로시저 호출 수. |
+| `procedure_sample` | 상위 20개 프로시저 이름 (비교 안 함, 정보성). |
+| `trigger_count` | 전체 트리거 호출 수. |
+
+**저장 원칙**: 전체 목록이 큰 필드는 `_count` + `_sample`만 기록. 전체는 `procedure-tracer` 스킬이 동적 grep.
+
 ## 기존 필드 의미 (v1 그대로)
 
 | 필드 | 설명 |
 |------|------|
-| `schema_version` | 매니페스트 자체 스키마 버전. **v2로 bump됨**. v1 매니페스트는 legacy 처리. |
+| `schema_version` | 매니페스트 자체 스키마 버전. **v3으로 bump됨**. v1/v2 매니페스트는 legacy 처리. |
 | `plugin_name` | 항상 `"ehr-harness"`. |
 | `plugin_version` | 생성 당시 plugin.json 의 version. 사람이 읽기 쉬운 정보 + 빠른 비교용. |
 | `profile` | `"ehr4"` 또는 `"ehr5"`. 프로파일이 바뀌면 거의 모든 파일이 충돌하므로 별도 처리. |
@@ -112,9 +160,13 @@
 | 값 | 조건 | 동작 |
 |----|------|------|
 | `fresh` | 매니페스트 없음 + 하네스 흔적 없음 | 기존 흐름(전체 생성) |
-| `legacy` | 매니페스트 없음 + 하네스 흔적 있음 (AGENTS.md 등) 또는 schema_version ≠ 2 | adopt vs 전체 재생성 vs 취소 |
-| `stamped` | 매니페스트 존재 + schema_version == 2 | 업데이트 모드 (3-bucket diff) |
+| `legacy` | 매니페스트 없음 + 하네스 흔적 있음 (AGENTS.md 등) 또는 schema_version ≠ 3 | adopt vs 전체 재생성 vs 취소 |
+| `stamped` | 매니페스트 존재 + schema_version == 3 | 업데이트 모드 (3-bucket diff, 플러그인 업데이트) |
+| `audit` | 매니페스트 존재 + schema_version == 3 + 사용자가 audit 키워드로 트리거 | 드리프트 검사 + 반자동 반영 (신규) |
 
-## 마이그레이션 (v1 → v2)
+## 마이그레이션 (v1/v2 → v3)
 
-v1 매니페스트는 `hs_is_legacy` 가 `legacy` 로 분류하여 사용자에게 adopt 여부를 묻는다. adopt 선택 시 Step 4-G 가 새 감별 결과와 함께 v2 매니페스트를 기록한다.
+v1/v2 매니페스트는 `hs_is_legacy` 가 `legacy` 로 분류하여 사용자에게 adopt 여부를 묻는다. adopt 선택 시 Step 4-G 가 새 감별 결과 + analysis 스냅샷과 함께 v3 매니페스트를 기록한다.
+
+- v1 → v3: 완전 재생성 (analysis 최초 기록)
+- v2 → v3: auth_model/db_verification/ddl_authoring 유지 + analysis 추가
