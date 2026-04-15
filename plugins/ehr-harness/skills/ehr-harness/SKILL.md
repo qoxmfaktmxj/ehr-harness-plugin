@@ -848,6 +848,35 @@ fi
 
 ---
 
+### 2-N. analysis JSON 조립
+
+프로젝트 분석 결과를 `analysis` 필드로 조립한다. audit 모드가 drift 비교의 기준점으로 사용.
+
+```bash
+# analyze.sh 로드
+source "$PLUGIN_ROOT/skills/ehr-harness/lib/analyze.sh"
+
+# 프로젝트 분석 결과 집계
+ANALYSIS_JSON=$(build_analysis_json "$(pwd)" "$PROFILE")
+
+echo "=== 분석 스냅샷 ==="
+echo "$ANALYSIS_JSON" | node -e "
+  let s='';process.stdin.on('data',d=>s+=d);
+  process.stdin.on('end',()=>{const m=JSON.parse(s);
+    console.log('analyzed_at:   ' + m.analyzed_at);
+    console.log('modules:       ' + m.module_map.length + '개');
+    console.log('session_vars:  ' + m.session_vars.join(', '));
+    console.log('critical_proc: ' + m.critical_proc_found.length + ' found / ' + m.critical_proc_missing.length + ' missing');
+    console.log('procedures:    ' + m.procedure_count + '건 호출');
+    console.log('triggers:      ' + m.trigger_count + '건');
+  });
+"
+```
+
+→ `ANALYSIS_JSON` 을 Step 4-G hs_write_manifest 에 전달.
+
+---
+
 ## Step 3-PRE: 소스/출력 매핑과 diff 계산
 
 이 단계의 1번(SOURCE_MAP 빌드)은 모든 모드에서 실행한다 (Step 4-G 가 매니페스트를 쓸 때 필요).
@@ -1670,7 +1699,7 @@ if [ -z "$GEN_AT" ]; then
   GEN_AT=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)
 fi
 
-hs_write_manifest "$MANIFEST" "$PLUGIN_VERSION" "$PROFILE" "$SOURCES_JSON" "$OUTPUTS_JSON" "$GEN_AT" "$AUTH_MODEL_JSON" "$DB_VERIFICATION_JSON" "$DDL_AUTH_JSON"
+hs_write_manifest "$MANIFEST" "$PLUGIN_VERSION" "$PROFILE" "$SOURCES_JSON" "$OUTPUTS_JSON" "$GEN_AT" "$AUTH_MODEL_JSON" "$DB_VERIFICATION_JSON" "$DDL_AUTH_JSON" "$ANALYSIS_JSON"
 
 echo "✓ HARNESS.json 갱신: plugin_version=$PLUGIN_VERSION, profile=$PROFILE"
 ```
