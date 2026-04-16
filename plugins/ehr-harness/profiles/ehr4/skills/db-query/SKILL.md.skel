@@ -19,7 +19,8 @@ description: "Oracle/Tibero DB SELECT 조회 스킬. 프로시저 소스, 테이
 
 ```bash
 DB_MODE=$(cat .claude/skills/ehr-db-query/DB_MODE 2>/dev/null || echo "code-only")
-echo "DB 모드: $DB_MODE"
+DB_VENDOR=$(cat .claude/skills/ehr-db-query/DB_VENDOR 2>/dev/null || echo "oracle")
+echo "DB 모드: $DB_MODE / DB 벤더: $DB_VENDOR"
 ```
 
 | 모드 | 이 스킬의 역할 |
@@ -130,7 +131,10 @@ grep -oE "(P_|PKG_|F_)\w+" <프로시저 파일> | sort -u
 
 **파싱 규칙:**
 - `url`에서 `log4jdbc:` 제거 → 순수 JDBC URL 추출
-- `username`, 인증 정보 그대로 사용
+  - Oracle 예: `jdbc:log4jdbc:oracle:thin:@host:port:SID` → `jdbc:oracle:thin:@host:port:SID`
+  - Tibero 예: `jdbc:log4jdbc:tibero:thin:@host:port:DB명` → `jdbc:tibero:thin:@host:port:DB명`
+- URL에 `tibero`가 포함되면 Tibero DB, 그 외는 Oracle
+- `username`, `password` — `${DB_USERNAME}` 같은 변수 참조면 사용자에게 실제 값 확인 요청
 - Resource가 여러 개면 `name="jdbc/ehr"` 기준
 
 ### 2순위: Spring 설정 파일 (`src/resource/` 또는 `WEB-INF/config/`)
@@ -154,8 +158,8 @@ context.xml이 없거나 접속 불가 시, 사용자에게 host/port/SID/계정
 ## Step 2: ojdbc 드라이버 위치 확인
 
 ```bash
-# 프로젝트 내 ojdbc jar 검색
-find . -name "ojdbc*.jar" 2>/dev/null
+# 프로젝트 내 JDBC 드라이버 검색 (Oracle + Tibero)
+find . -name "ojdbc*.jar" -o -name "tibero*-jdbc.jar" -o -name "tibero*.jar" 2>/dev/null
 ```
 
 일반적 위치:
@@ -163,10 +167,14 @@ find . -name "ojdbc*.jar" 2>/dev/null
 - `lib/ojdbc*.jar` (프로젝트 루트 lib 디렉토리)
 - `~/.m2/repository/com/oracle/database/jdbc/ojdbc8/` (Maven 로컬 저장소)
 
-**Tibero인 경우:**
-- `tibero6-jdbc.jar` 또는 `tibero7-jdbc.jar`
-- 드라이버 클래스: `com.tmax.tibero.jdbc.TbDriver`
-- URL 형식: `jdbc:tibero:thin:@{host}:{port}:{DB명}`
+**DB 벤더별 드라이버:**
+
+| 벤더 | JAR 파일 | 드라이버 클래스 | URL 형식 |
+|------|---------|--------------|---------|
+| Oracle | `ojdbc8.jar`, `ojdbc6.jar` | `oracle.jdbc.OracleDriver` | `jdbc:oracle:thin:@{host}:{port}:{SID}` |
+| Tibero | `tibero6-jdbc.jar`, `tibero7-jdbc.jar` | `com.tmax.tibero.jdbc.TbDriver` | `jdbc:tibero:thin:@{host}:{port}:{DB명}` |
+
+> context.xml URL에 `tibero`가 포함되어 있으면 Tibero 드라이버를 사용한다. `DB_VENDOR` 파일로 자동 판별됨.
 
 ---
 
@@ -181,10 +189,23 @@ import java.sql.*;
 
 public class DbQuery {
     public static void main(String[] args) throws Exception {
-        // -- 접속 정보 (context.xml에서 파싱) --
-        String url  = "jdbc:oracle:thin:@{HOST}:{PORT}:{SID}";
+        // -- 접속 정보 (context.xml에서 파싱, DB_VENDOR에 따라 자동 분기) --
+        String vendor = "{DB_VENDOR}"; // "oracle" 또는 "tibero"
+        String host = "{HOST}";
+        String port = "{PORT}";
+        String sid  = "{SID}";
         String user = "{USERNAME}";
         String pass = "{PASSWORD}";
+
+        // 벤더별 JDBC URL + 드라이버 자동 설정
+        String url;
+        if ("tibero".equals(vendor)) {
+            Class.forName("com.tmax.tibero.jdbc.TbDriver");
+            url = "jdbc:tibero:thin:@" + host + ":" + port + ":" + sid;
+        } else {
+            Class.forName("oracle.jdbc.OracleDriver");
+            url = "jdbc:oracle:thin:@" + host + ":" + port + ":" + sid;
+        }
 
         String sql = args.length > 0 ? args[0]
             : "SELECT TABLE_NAME FROM USER_TABLES ORDER BY TABLE_NAME";
@@ -226,13 +247,12 @@ public class DbQuery {
 ### 컴파일 & 실행
 
 ```bash
-# Oracle (WEB-INF/lib에서 드라이버 찾은 경우)
-javac -cp "WebContent/WEB-INF/lib/ojdbc8.jar" _workspace/DbQuery.java
-java -cp "WebContent/WEB-INF/lib/ojdbc8.jar;_workspace" DbQuery "SELECT ..."
+# DB_VENDOR에 따라 자동 선택
+DRIVER_JAR=$(find . -name "ojdbc*.jar" -o -name "tibero*-jdbc.jar" -o -name "tibero*.jar" 2>/dev/null | head -1)
+echo "드라이버: $DRIVER_JAR"
 
-# Tibero
-javac -cp "{tibero-jdbc.jar 경로}" _workspace/DbQuery.java
-java -cp "{tibero-jdbc.jar 경로};_workspace" DbQuery "SELECT ..."
+javac -cp "$DRIVER_JAR" _workspace/DbQuery.java
+java -cp "$DRIVER_JAR;_workspace" DbQuery "SELECT ..."
 ```
 
 > Windows: classpath 구분자 `;` / Linux·Mac: `:`
