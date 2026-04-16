@@ -1,5 +1,4 @@
 # Codex CLI 프로젝트 설정
-# AGENTS.md를 기본으로 읽고, CLAUDE.md도 폴백으로 읽는다
-
-[project]
-project_doc_fallback_filenames = ["CLAUDE.md"]
+# Codex 는 AGENTS.md 를 자동 인식한다.
+# 아래 instructions 는 보조 지시로, 하네스가 주입한 규칙과 스킬을 따르도록 한다.
+instructions = "AGENTS.md 의 모든 규칙과 스킬을 반드시 따른다. CLAUDE.md 도 참조하되 충돌 시 AGENTS.md 우선."
