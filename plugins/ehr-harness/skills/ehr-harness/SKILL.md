@@ -907,6 +907,7 @@ $1|$2|$3|$4"
   # 인프라 (shared/)
   add "profiles/shared/settings.json"         "$PLUGIN_ROOT/profiles/shared/settings.json"         ".claude/settings.json"        ".claude/settings.json"
   add "profiles/shared/hooks/db-read-only.sh" "$PLUGIN_ROOT/profiles/shared/hooks/db-read-only.sh" ".claude/hooks/db-read-only.sh" ".claude/hooks/db-read-only.sh"
+  add "profiles/shared/hooks/vcs-no-commit.sh" "$PLUGIN_ROOT/profiles/shared/hooks/vcs-no-commit.sh" ".claude/hooks/vcs-no-commit.sh" ".claude/hooks/vcs-no-commit.sh"
   add "profiles/shared/.codex/config.toml"    "$PLUGIN_ROOT/profiles/shared/.codex/config.toml"    ".codex/config.toml"           ".codex/config.toml"
 
   # 문서 (skel 기반)
@@ -1263,6 +1264,9 @@ Write: .claude/settings.json
 Read: $PLUGIN_ROOT/profiles/shared/hooks/db-read-only.sh
 Write: .claude/hooks/db-read-only.sh
 
+Read: $PLUGIN_ROOT/profiles/shared/hooks/vcs-no-commit.sh
+Write: .claude/hooks/vcs-no-commit.sh
+
 Read: $PLUGIN_ROOT/profiles/shared/.codex/config.toml
 Write: .codex/config.toml
 
@@ -1610,6 +1614,7 @@ echo "=== 생성 파일 목록 ==="
 ls -la AGENTS.md CLAUDE.md GEMINI.md README.md .gitignore
 ls -la .claude/settings.json
 ls -la .claude/hooks/db-read-only.sh
+ls -la .claude/hooks/vcs-no-commit.sh
 ls -la .claude/agents/*.md
 ls -la .claude/skills/*/SKILL.md
 ls -la .agents/skills/*/SKILL.md

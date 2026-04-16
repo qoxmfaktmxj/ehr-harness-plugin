@@ -7,6 +7,10 @@
           {
             "type": "command",
             "command": "bash .claude/hooks/db-read-only.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/vcs-no-commit.sh"
           }
         ]
       }

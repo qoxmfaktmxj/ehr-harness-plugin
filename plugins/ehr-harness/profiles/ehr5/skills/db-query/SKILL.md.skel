@@ -298,6 +298,36 @@ GROUP BY NAME ORDER BY NAME
 
 ---
 
+## UPDATE 제안 시 3단계 안전 템플릿
+
+AI는 직접 UPDATE를 실행할 수 없다 (hooks 에서 차단됨). UPDATE가 필요한 경우 아래 3단계 형식으로 SQL 스크립트를 제안한다:
+
+```sql
+-- Step 1: 변경 전 확인 (사용자가 직접 실행)
+SELECT 대상컬럼들
+  FROM 테이블
+ WHERE 조건;
+
+-- Step 2: 변경 실행
+UPDATE 테이블
+   SET 컬럼 = 값
+ WHERE 조건;
+-- COMMIT; (확인 후 주석 해제)
+
+-- Step 3: 변경 후 검증
+SELECT 대상컬럼들
+  FROM 테이블
+ WHERE 조건;
+-- 기대값과 일치하면 COMMIT, 아니면 ROLLBACK
+```
+
+**규칙:**
+- WHERE 조건에 반드시 PK(ENTER_CD, SABUN, PAY_ACTION_CD 등)를 명시
+- Step 1과 Step 3의 SELECT는 동일해야 변경 전후 비교 가능
+- COMMIT은 주석 처리하여 사용자가 확인 후 직접 실행하도록 유도
+
+---
+
 ## 주의사항
 
 1. **500행 제한** — 대량 데이터는 WHERE 조건으로 좁혀서 조회

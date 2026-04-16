@@ -144,6 +144,38 @@ JSP → Controller → Service → Mapper → Procedure
 - Oracle 측 확인 필요 사항: {목록}
 ```
 
+## 디버깅 가이드
+
+### 이상값 디버깅 원칙
+
+DB 컬럼에 예상과 다른 값(0, null 등)이 있을 때 원인을 두 가지로 분리한다:
+
+1. **실행 경로 문제**: 해당 값을 계산하는 프로시저가 CURSOR 조건, 상태 플래그 등으로 인해 아예 실행되지 않은 경우
+2. **계산 로직 문제**: 프로시저가 실행됐지만 입력 데이터(플래그, 참조 테이블)에 의해 계산 결과 자체가 그 값인 경우
+
+**반드시 둘 다 확인한 후에만 원인을 확정한다.** 한쪽만 확인하고 결론 내리지 않는다.
+
+### 프로시저 호출 체인 재귀 탐색
+
+EHR 프로시저는 다른 프로시저를 호출하는 체인 구조가 일반적이다 (예: P_CPN_SEP_PAY_MAIN → P_CPN_SEP_TAX_INS → P_CPN_SEP_TAX_INS_2020).
+
+이슈 관련 프로시저를 조사할 때:
+1. 최상위 프로시저 소스에서 `P_`, `PKG_` 호출을 모두 추출
+2. 호출된 하위 프로시저에서 문제 컬럼을 UPDATE 하는 것을 찾을 때까지 재귀 추적
+3. 호출 체인 전체를 한 번에 정리한 뒤 분석을 시작
+
+```sql
+-- 호출 체인 자동 추출 쿼리 예시
+SELECT NAME, TEXT FROM USER_SOURCE
+ WHERE NAME IN (
+   SELECT DISTINCT REGEXP_SUBSTR(TEXT, '(P_[A-Z0-9_]+|PKG_[A-Z0-9_]+)', 1, 1, 'i')
+     FROM USER_SOURCE WHERE NAME = '최상위_프로시저명'
+ )
+ ORDER BY NAME, LINE;
+```
+
+---
+
 ## 사용 스킬
 
 이 에이전트는 `.claude/skills/procedure-tracer/SKILL.md`를 참조하여 추적 방법론을 사용한다.
