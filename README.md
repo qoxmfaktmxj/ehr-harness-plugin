@@ -66,13 +66,16 @@ your-ehr5-project/
 │   │   └── vcs-no-commit.sh      ← Git/SVN 커밋·푸시 차단 (AI는 코드 수정까지만)
 │   ├── agents/
 │   │   ├── screen-builder.md     ← 화면 생성 에이전트
-│   │   └── procedure-tracer.md   ← 프로시저 체인 분석 에이전트
+│   │   ├── procedure-tracer.md   ← 프로시저 체인 분석 에이전트
+│   │   └── release-reviewer.md   ← 릴리즈 검증 + 회귀 판정 (EHR4: B1~B6 / EHR5: B1~B10)
 │   └── skills/
 │       ├── screen-builder/SKILL.md      ← 화면 생성 코드 템플릿
 │       ├── codebase-navigator/SKILL.md  ← 코드 경로 탐색
 │       ├── procedure-tracer/SKILL.md    ← 프로시저 추적 로직
+│       ├── impact-analyzer/SKILL.md     ← 변경 전 영향도 예측 + Go/HOLD/STOP 판정
 │       ├── db-query/SKILL.md            ← DB SELECT 조회
-│       └── domain-knowledge/SKILL.md    ← 도메인 지식 레퍼런스
+│       ├── domain-knowledge/SKILL.md    ← 도메인 지식 레퍼런스
+│       └── design-guide/SKILL.md        ← IDS 컴포넌트 가이드 (프로젝트에 Storybook 존재 시에만 생성)
 │
 ├── .agents/                      ← Codex CLI 호환 (스킬 복사본)
 │   └── skills/
@@ -136,14 +139,22 @@ git clone https://github.com/qoxmfaktmxj/ehr-harness-plugin.git ~/Desktop/dev/eh
 
 ### 방법 2: 수동 업데이트 (명령이 안 될 때)
 
+> **버전 경로 주의**: 아래 경로의 `1.8.0` 은 **현재 릴리즈 버전**이다. 설치된 버전은
+> `cat ~/.claude/plugins/cache/ehr-harness/ehr-harness/*/` *(wildcard)* 로 확인하거나,
+> `plugin.json::version` 을 따른다. 플러그인이 새 버전으로 올라가면 이 경로도 함께 바뀐다.
+
 ```bash
+# 0. (사전) 현재 설치된 버전 확인
+VERSION=$(ls ~/.claude/plugins/cache/ehr-harness/ehr-harness/ | head -1)
+echo "설치된 버전: $VERSION"
+
 # 1. 마켓플레이스 캐시 git pull
 cd ~/.claude/plugins/marketplaces/ehr-harness
 git pull origin main
 
-# 2. 플러그인 캐시에 동기화
+# 2. 플러그인 캐시에 동기화 ($VERSION 변수 사용으로 버전 하드코딩 제거)
 cp -r ~/.claude/plugins/marketplaces/ehr-harness/plugins/ehr-harness/. \
-       ~/.claude/plugins/cache/ehr-harness/ehr-harness/1.0.0/
+       ~/.claude/plugins/cache/ehr-harness/ehr-harness/$VERSION/
 
 # 3. installed_plugins.json SHA 갱신
 NEW_SHA=$(cd ~/.claude/plugins/marketplaces/ehr-harness && git rev-parse HEAD)
@@ -167,16 +178,20 @@ console.log('업데이트 완료. SHA:', '$NEW_SHA');
 cd ~/Desktop/dev/ehr-harness-plugin
 git pull origin main
 
-# 2. 플러그인 캐시에 덮어쓰기
+# 2. 플러그인 캐시에 덮어쓰기 (버전은 실제 설치 버전으로 자동 탐지)
+VERSION=$(ls ~/.claude/plugins/cache/ehr-harness/ehr-harness/ | head -1)
 cp -r plugins/ehr-harness/. \
-       ~/.claude/plugins/cache/ehr-harness/ehr-harness/1.0.0/
+       ~/.claude/plugins/cache/ehr-harness/ehr-harness/$VERSION/
 ```
 
 ### 업데이트 확인
 
 ```bash
-# 캐시에 새 내용이 반영되었는지 확인 (최근 수정된 스킬명 등으로 검증)
-grep "name:" ~/.claude/plugins/cache/ehr-harness/ehr-harness/1.0.0/profiles/ehr5/skills/*/SKILL.md* 2>/dev/null
+# 캐시에 새 내용이 반영되었는지 확인 (와일드카드로 버전 무관 매칭)
+grep "name:" ~/.claude/plugins/cache/ehr-harness/ehr-harness/*/profiles/ehr5/skills/*/SKILL.md* 2>/dev/null
+
+# 현재 설치된 버전과 plugin.json 버전 일치 여부 확인
+cat ~/.claude/plugins/cache/ehr-harness/ehr-harness/*/.claude-plugin/plugin.json | grep version
 ```
 
 Claude Code를 재시작하지 않아도 다음 대화부터 바로 반영된다.
@@ -254,9 +269,14 @@ cd /path/to/ehr-project
 | 14 | `.claude/skills/procedure-tracer/SKILL.md` | ~300줄 | 프로시저 추적. |
 | 15 | `.claude/skills/db-query/SKILL.md` | ~200줄 | DB 조회 가이드. |
 | 16 | `.claude/skills/impact-analyzer/SKILL.md` | ~500줄 | 변경 전 영향도 예측 + HOLD·STOP/HOLD/Conditional-Go/Go 판정 + CHECK 병기. |
-| 17 | `.agents/skills/` | — | 위 6개 스킬의 Codex 호환 복사본. |
-| 18 | `.codex/config.toml` | ~5줄 | Codex CLI 설정. |
-| 19 | `.gitignore` | ~15줄 | 런타임 산출물 제외. |
+| 17 | `.claude/skills/design-guide/SKILL.md` | ~200줄 | IDS 컴포넌트 가이드. **조건부 생성** — 프로젝트에 Storybook(`stories/`·`*.stories.*`)이 감지될 때만 생성. Storybook 없으면 이 파일·카탈로그·MANIFEST 전체 스킵. |
+| 18 | `.agents/skills/` | — | 위 스킬들의 Codex 호환 복사본 (생성된 스킬만 복사). |
+| 19 | `.codex/config.toml` | ~5줄 | Codex CLI 설정. |
+| 20 | `.gitignore` | ~15줄 | 런타임 산출물 제외. |
+
+**프로파일별 차이**: 현재 v1.8.0 기준으로 EHR4와 EHR5 **스킬/에이전트 구성은 동일**(7개 스킬 + 3개 에이전트). 단, **각 파일의 내용은 기술 스택에 따라 다르게 생성**된다 (Velocity vs MyBatis, Ant vs Maven 등). 프로파일 디렉토리(`profiles/ehr4/`, `profiles/ehr5/`)는 **독립적**이므로, 향후 한쪽 프로파일에만 특화 스킬이 추가될 수 있다 (예: EHR5 전용 MyBatis 특화 스킬). 현재 제공하는 스킬 목록은 §11 디렉토리 구조에서 프로파일별로 확인 가능.
+
+**파일 총합 (design-guide 제외 기준)**: 문서 4 + 설정 2 + 훅 2 + 에이전트 3 + 스킬 6 × 2복사본 = **23개**. Storybook 있는 프로젝트는 design-guide 스킬 × 2복사본 + 카탈로그/MANIFEST 포함하여 **+4~5개** 추가 생성.
 
 ### 플랫폼별 역할
 
@@ -395,7 +415,20 @@ Codex CLI:
 | Step 6 판정 | HOLD·STOP / HOLD / Conditional-Go / Go + CHECK | 고정 |
 | Step 7 리포트 템플릿 | 표준 + 공용 STOP | 고정 |
 
-### 5-9. 에이전트 (.claude/agents/)
+### 5-9. design-guide SKILL.md — IDS 컴포넌트 가이드 (조건부)
+
+**생성 기준**: 프로젝트에 Storybook이 감지(`stories/`·`*.stories.*`·`.storybook/`)될 때만 생성. 없으면 이 섹션 전체 스킵.
+
+| 섹션 | 내용 | 고정/실측 |
+|------|------|----------|
+| SKILL.md | IDS 컴포넌트 진입 가이드, 사용 패턴 | 고정 |
+| INDEX.md | Storybook story 카탈로그 (46개 기본 그룹: 00-guides/01-atoms/02-modules/03-pages/04-utilities/05-modal) | **실측** (story 파일 스캔) |
+| MANIFEST.json | 각 story 의 title/path/props 메타데이터 | **실측** |
+| 핵심 10개 inline | 자주 쓰는 컴포넌트 10개는 SKILL.md에 inline 예시로 포함 | **실측** (Storybook story 선정) |
+
+**왜 조건부인가**: EHR 프로젝트 대부분은 JSP/IBSheet 기반이라 Storybook이 없다. Storybook을 운영하는 팀(주로 프론트엔드 모던화 진행 중인 조직)에만 유효하므로 **존재 시에만 생성**하여 컨텍스트 낭비를 막는다.
+
+### 5-10. 에이전트 (.claude/agents/)
 
 **생성 기준**: 에이전트는 스킬을 참조하므로 대부분 고정.
 
@@ -578,7 +611,8 @@ find . -name "ojdbc*.jar" -o -name "tibero*.jar" 2>/dev/null
 
 ```
 1. 생성 파일 수 확인
-   EHR4/EHR5: 21개 파일 (6 스킬 × 2 복사본 + 3 에이전트 + 6 문서/설정)
+   EHR4/EHR5: 23개 파일 (7 스킬 × 2 복사본 중 design-guide 제외 시 6 × 2 + 3 에이전트 + 6 문서/설정)
+   Storybook 존재 프로젝트: +4~5개 (design-guide 스킬 × 2복사본 + INDEX/MANIFEST)
 
 2. AGENTS.md 교차 확인
    모듈 맵의 모듈 목록 vs 실제 디렉토리 목록 비교
@@ -609,13 +643,15 @@ find . -name "ojdbc*.jar" -o -name "tibero*.jar" 2>/dev/null
 profiles/
 ├── shared/       ← 버전 무관 공통 파일 (settings.json, 훅, .codex)
 ├── ehr4/         ← Spring MVC + Anyframe + Velocity + Ant
-│   ├── skeleton/ ← 변수 치환용 문서 스켈레톤
-│   ├── agents/   ← 에이전트 시스템 프롬프트 (3개)
-│   └── skills/   ← 스킬 스켈레톤 (5개)
+│   ├── skeleton/ ← 변수 치환용 문서 스켈레톤 (AGENTS/CLAUDE/README)
+│   ├── agents/   ← 에이전트 시스템 프롬프트 (3개: screen-builder, procedure-tracer, release-reviewer)
+│   ├── skills/   ← 스킬 스켈레톤 (7개: screen-builder, codebase-navigator, procedure-tracer, db-query, impact-analyzer, design-guide, domain-knowledge)
+│   └── reference/ ← 고정 참조 (CODE_MAP, DB_MAP)
 └── ehr5/         ← Spring Boot + MyBatis + Maven
     ├── skeleton/
-    ├── agents/
-    └── skills/
+    ├── agents/    ← 3개 (내용은 EHR5 기준 — release-reviewer는 B1~B10)
+    ├── skills/    ← 7개 (내용은 MyBatis/Spring Boot 기반)
+    └── reference/
 ```
 
 ### 스켈레톤 변수
@@ -737,13 +773,16 @@ ehr-harness-plugin/
 │       │   └── ehr-harness/
 │       │       ├── SKILL.md      # 메타 스킬 (이 플러그인의 핵심)
 │       │       └── lib/          # 런타임 helper (SKILL.md 가 Step 실행 중 호출)
-│       │           ├── detect.sh         # EHR 버전 / auth_model / DDL 폴더 감별
-│       │           ├── analyze.sh        # 프로젝트 분석 (모듈·세션변수·프로시저·law count)
-│       │           ├── audit.sh          # drift 계산·리포트 렌더 (compute_drift / drift_importance)
-│       │           ├── merge.sh          # AGENTS.md / CLAUDE.md 섹션 단위 병합 (사용자 편집 보존)
-│       │           ├── harness-state.sh  # HARNESS.json v3 매니페스트 관리
-│       │           ├── gen-code-map.js   # 대상 프로젝트 CODE_MAP 런타임 생성 (Step 2-L-2)
-│       │           └── *.test.sh         # 단위 테스트
+│       │           ├── HARNESS_SCHEMA.md      # HARNESS.json v3 스키마 정의
+│       │           ├── detect.sh              # EHR 버전 / auth_model / DDL 폴더 감별
+│       │           ├── analyze.sh             # 프로젝트 분석 (모듈·세션변수·프로시저·law count)
+│       │           ├── audit.sh               # drift 계산·리포트 렌더 (compute_drift / drift_importance)
+│       │           ├── merge.sh               # AGENTS.md / CLAUDE.md 섹션 단위 병합 (사용자 편집 보존)
+│       │           ├── harness-state.sh       # HARNESS.json v3 매니페스트 관리
+│       │           ├── gen-code-map.js        # 대상 프로젝트 CODE_MAP 런타임 생성 (Step 2-L-2)
+│       │           ├── ddl-authoring.notes.md # DDL 자동 작성 설계 노트 (오프라인 레퍼런스)
+│       │           ├── fixtures/              # 테스트 fixture 데이터셋
+│       │           └── *.test.sh              # 단위 테스트 (detect/analyze/audit/merge/harness-state/scenarios)
 │       │
 │       ├── scripts/              # offline 유지보수 도구 (런타임 미사용)
 │       │   └── gen-example-codemap.js    # EHR4 예시 병합 CODE_MAP 스냅샷 생성 (fallback 용)
@@ -767,34 +806,39 @@ ehr-harness-plugin/
 │           │   │   ├── screen-builder.md
 │           │   │   ├── procedure-tracer.md
 │           │   │   └── release-reviewer.md   # 릴리즈 검증 (B1~B6 EHR4 기준)
-│           │   ├── skills/       # 스킬 (6개 + design-guide 는 프로젝트에 Storybook 있을 때만 생성됨)
+│           │   ├── skills/       # 스킬 7개 (6개 .skel + domain-knowledge.md 고정 + design-guide는 대상 프로젝트에 Storybook 있을 때만 생성)
 │           │   │   ├── screen-builder/SKILL.md.skel
 │           │   │   ├── codebase-navigator/SKILL.md.skel
 │           │   │   ├── procedure-tracer/SKILL.md.skel
 │           │   │   ├── db-query/SKILL.md.skel
 │           │   │   ├── impact-analyzer/SKILL.md.skel
+│           │   │   ├── design-guide/SKILL.md.skel
 │           │   │   └── domain-knowledge/SKILL.md
 │           │   └── reference/    # 고정 참조 문서
 │           │       ├── CODE_MAP.md   # 예시 3개 프로젝트 병합 (런타임 생성 실패 시 fallback)
 │           │       └── DB_MAP.md     # 테이블 스키마 레퍼런스
 │           │
 │           └── ehr5/             # EHR5 프로파일 (Maven + MyBatis + Spring Boot)
-│               ├── skeleton/
-│               ├── agents/       # 에이전트 (3개, release-reviewer 는 B1~B10)
-│               ├── skills/       # 스킬 (6개 + design-guide 는 프로젝트에 Storybook 있을 때만 생성됨)
+│               ├── skeleton/     # AGENTS/CLAUDE/README.md.skel 3종
+│               ├── agents/       # 에이전트 3개 (screen-builder, procedure-tracer, release-reviewer는 B1~B10)
+│               ├── skills/       # 스킬 7개 (EHR4와 동일 구조, 내용은 MyBatis/Spring Boot 기반)
 │               └── reference/    # CODE_MAP.md (기본 패키지 스냅샷, fallback), DB_MAP.md
 │
 ├── README.md                     # 이 파일
 └── .gitignore
 ```
 
+> **프로파일 비대칭 허용**: 현재 v1.8.0 기준 EHR4/EHR5의 스킬·에이전트 **목록**은 동일하지만, 각 프로파일은 **독립 디렉토리**이므로 향후 한쪽에만 특화 스킬이 추가될 수 있다. 예를 들어 "EHR5 전용 MyBatis 동적 SQL 가이드" 같은 버전별 특화 스킬이 나올 수 있다. 메타 스킬(SKILL.md)은 감지된 프로파일에 **존재하는 스킬만** 생성하므로 비대칭 구성도 그대로 반영된다.
+
 ---
 
-## 12. Schema v2 신규 기능 (2026-04 추가)
+## 12. Schema v3 기능 (현행)
+
+> **Schema 진화**: v1(초기) → v2(2026-04 자동 감별 파이프라인 + release-reviewer 조건부 검증) → **v3 (현재, audit 모드 도입 + analysis_snapshot 저장)**. v3는 §13 audit 기능의 기반이 된다. 기존 v1/v2 매니페스트는 `hs_is_legacy` 로 분류되어 adopt 프롬프트가 뜬다.
 
 ### 자동 감별 파이프라인
 
-하네스 생성 시점에 프로젝트의 특성을 자동 감별하여 HARNESS.json v2 에 기록한다:
+하네스 생성 시점에 프로젝트의 특성을 자동 감별하여 HARNESS.json v3 에 기록한다:
 
 | 감별 항목 | 수집 방법 | 용도 |
 |-----------|----------|------|
@@ -821,11 +865,12 @@ ehr-harness-plugin/
 4. 치명 네임스페이스 (P_CPN_*, PKG_CPN_*, P_HRM_POST*, P_TIM_*, P_HRI_AFTER_*) 자동 차단
 5. 트리거는 연쇄 장애 위험으로 지원 제외
 
-### HARNESS.json v1 → v2 마이그레이션
+### HARNESS.json 버전 마이그레이션
 
-- v1 매니페스트는 `hs_is_legacy` 가 legacy 로 분류
-- 사용자에게 adopt 여부 묻고 v2 로 재스탬프
-- 기존 하네스 설치와 하위 호환 유지
+- v1/v2 매니페스트는 `hs_is_legacy` 가 legacy 로 분류
+- 사용자에게 adopt 여부 묻고 v3 로 재스탬프 (analysis_snapshot 채워서 다음 audit의 drift baseline 확보)
+- 기존 하네스 설치와 하위 호환 유지 — 파일 자체는 덮어쓰지 않고 sha 만 스탬프
+- 세부 스키마는 `plugins/ehr-harness/skills/ehr-harness/lib/HARNESS_SCHEMA.md` 참조
 
 ---
 
