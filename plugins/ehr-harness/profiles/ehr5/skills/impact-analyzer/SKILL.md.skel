@@ -1,0 +1,78 @@
+---
+name: ehr-impact-analyzer
+description: "EHR5 변경 전 영향도 예측 스킬. 단일 파일·프로시저명·queryId 입력으로 체인 추적, 위험 신호, 영향 화면(상한 10), 수정 권고 판정(HOLD·STOP / HOLD / Conditional-Go / Go)을 반환한다. '영향도 분석', '이거 수정하면 뭐 깨짐', '/impact', '회귀 테스트 대상', '수정 영향' 등의 키워드에 트리거."
+---
+
+# Impact Analyzer — EHR5 변경 전 영향도 예측 스킬
+
+## 역할
+
+- **변경 전** 영향 예측 (변경 후 리뷰는 release-reviewer)
+- 단일 파일·프로시저명·queryId·URL·테이블명 진입점 지원
+- 공용 파일(common.js, include JSP) 수정 차단 권고
+- 회귀 테스트 대상 화면 목록 추출 (종점 JSP 10개)
+- Unresolved refs(동적 호출) 경고 (CHECK 판정)
+
+## 기존 스킬 재사용
+
+| 단계 | 재사용 대상 | 참조 섹션 |
+|------|---|---|
+| 체인 추적 | `ehr-procedure-tracer` SKILL | §순방향 추적, §역방향 추적 |
+| 안전장치 | `ehr-procedure-tracer` SKILL | §추적 안전장치 (max_depth=10, visited_set) |
+| 동적 SQL 패턴 | `ehr-procedure-tracer` SKILL | §동적 SQL 패턴 (1/2/3) |
+| 치명 프로시저 매칭 | `AGENTS.md` | `critical_proc_found` 섹션 |
+| 재구현 금지 컴포넌트 | `ehr-domain-knowledge` SKILL | §6 재구현 금지 컴포넌트 |
+
+---
+
+## Step 0: DB 모드 판정 (선택적)
+
+프로시저/테이블 진입 시 체인 내부 로직을 더 깊이 보려면 DB 모드가 필요. 코드 grep 으로도 판정 가능한 경우가 많으므로 이 스킬은 `code-only` 기본으로 동작한다.
+
+```bash
+DB_MODE=$(cat .claude/skills/ehr-db-query/DB_MODE 2>/dev/null || echo "code-only")
+```
+
+- `direct` / `dump`: procedure-tracer 의 Step 0 참조. 프로시저 내부 SQL 확인 가능.
+- `code-only` (기본): 매퍼 XML grep 만. 내부 로직은 "확인 불가" 로 보고.
+
+---
+
+## Step 1: 입력 판별
+
+입력 문자열을 정규식 우선순위 순으로 매칭한다.
+
+| 우선순위 | 패턴 | 예시 | 유형 |
+|----|---|---|---|
+| 1 | `^(P_|PKG_)[A-Z0-9_]+$` | `P_CPN_CAL_PAY_MAIN` | 프로시저/패키지 |
+| 2 | `^T[A-Z0-9]+$` | `TCPN771` | 테이블 |
+| 3 | `^/.*\.do$` | `/SepDcPayMgr.do` | URL |
+| 4 | `.*-sql-query\.xml$` | `SepDcPayMgr-sql-query.xml` | Mapper XML (EHR5) |
+| 5 | `.*Controller\.java$` | `FooController.java` | Java Controller |
+| 6 | `.*Service\.java$` | `FooService.java` | Java Service |
+| 7 | `.*\.jsp$` | `vacationApp.jsp` | JSP |
+| 8 | `.*\.js$` | `common.js` | JS |
+| 9 | `^[a-z][a-zA-Z0-9]{3,}$` | `getSepDcPayList` | queryId |
+
+매칭 실패 시:
+```
+❌ 입력 유형 판별 불가: {입력}
+예시: P_CPN_CAL_PAY_MAIN / common.js / getFooList / /FooMgr.do / TCPN771
+```
+
+### 실전 가치 순위 기록
+
+| 순위 | 유형 |
+|------|------|
+| 1 | 프로시저/패키지 |
+| 2 | Mapper XML · queryId |
+| 3 | Service / Controller |
+| 4 | JSP |
+| 5 | 공용 JS · include JSP · DDL |
+
+입력이 공용 파일(순위 5)로 판별되면 **Step 5 조기 컷** + STOP 우선 처리 (Step 2 체인 추적 스킵).
+
+### 공용 파일 판별 기준
+
+- 공용 JS: 파일명 `common.js` / 경로 `src/main/webapp/resources/js/common/` 하위
+- 공용 include JSP: `src/main/webapp/WEB-INF/jsp/common/` 하위 또는 파일명에 `header|footer|layout|top|bottom|nav` 포함
