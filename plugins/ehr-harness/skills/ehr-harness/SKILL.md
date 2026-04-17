@@ -50,8 +50,21 @@ HAS_SP=$(SETTINGS="$SETTINGS" node -e "
       k.startsWith('superpowers@') && ep[k] === true
     );
     console.log(found ? 'yes' : 'no');
-  } catch(e) { console.log('error'); }
-" 2>/dev/null)
+  } catch(e) {
+    console.error('[SKILL] settings.json 읽기/파싱 실패: ' + e.message);
+    console.error('       파일 경로: ' + process.env.SETTINGS);
+    process.exit(1);
+  }
+")
+SP_CHECK_EXIT=$?
+
+# settings.json 자체 파싱 실패 → Superpowers 설치 여부 판정 불가
+# 'no' (미설치) 로 오인하지 않도록 명시적으로 별도 처리 후 안전을 위해 설치 안내로 유도
+if [ "$SP_CHECK_EXIT" -ne 0 ]; then
+  echo "⚠ settings.json 읽기 실패 — Superpowers 설치 여부 판정 불가" >&2
+  echo "   settings.json 을 점검한 뒤 다시 실행하세요." >&2
+  HAS_SP="unknown"
+fi
 
 if [ "$HAS_SP" != "yes" ]; then
   cat <<'EOF'
@@ -528,7 +541,11 @@ fi
 ```
 
 → 응답 파싱 후 `DB_CONNECTION` 재구성 → 2-J-2 재시도.
-→ **3회 연속 실패 시 자동으로 [3] CODE-ONLY로 fallback**.
+→ **3회 연속 실패 시**: 자동 강등 금지. AskUserQuestion 으로 다음 중 명시 선택:
+  - (a) [2] DUMP 모드 — DDL 덤프 폴더가 있다면 이 경로로 전환
+  - (b) [3] CODE-ONLY — DB 없이 코드 grep 만으로 진행 (치명 프로시저 일부 확인 불가 — 사용자 명시 동의 필요)
+  - (c) 접속 정보 다시 확인 후 재입력 (호스트/포트 네트워크 이슈 재확인)
+→ DB 접속 불가는 치명 프로시저 존재 확인 + DB 검증 Tier 1/2 불가능으로 이어지므로, 사용자가 영향을 이해한 상태에서 다음 모드를 선택하게 한다.
 
 **[2] DDL 덤프 폴더 사용 (DUMP 모드)**
 
@@ -551,7 +568,7 @@ FORMAT=$(detect_dump_format "$DUMP_DIR")
 # - F2: 객체 타입별 서브폴더 (tables/, procedures/, packages/, functions/, triggers/)  ★ 대부분
 # - F3: 객체별 개별 파일 (한 폴더에 다 섞임)
 # - F4: Toad/SQL Developer 카테고리별 익스포트
-# - F5: .dmp 바이너리 → 미지원, "impdp로 import 후 직접 연결 필요" 안내 후 CODE-ONLY fallback
+# - F5: .dmp 바이너리 → 미지원. "impdp 로 import 후 direct 연결" 안내 후 AskUserQuestion 으로 "[3] CODE-ONLY 진행 / 중단" 명시 선택 (자동 CODE-ONLY fallback 금지 — CODE-ONLY 한계를 사용자가 인지하고 선택하도록)
 
 # 전체 파일 스캔 (확장자 무시)
 TOTAL_FILES=$(find "$DUMP_DIR" -type f 2>/dev/null | wc -l)
@@ -837,16 +854,28 @@ DB_PREFIX_MAP="TCP→CPN(급여) THR→HRM(인사) TSY→SYS(시스템) TTI→TI
 
 → `SUBPACKAGE_MAP`과 `DB_PREFIX_MAP`은 CLAUDE.md.skel 치환에 사용된다.
 
-#### 2-L-2. CODE_MAP.md / DB_MAP.md 고정 레퍼런스 복사
+#### 2-L-2. CODE_MAP.md 런타임 생성 + DB_MAP.md 레퍼런스 복사
 
-플러그인에 포함된 고정 레퍼런스 파일을 프로젝트 루트로 복사한다.
-이 파일들은 EHR5 기본 패키지 기준이며, 스킬에서 상세 탐색 시 참조한다.
+**CODE_MAP.md** — 대상 프로젝트의 실제 `*Controller.java` 위치를 스캔해 런타임 생성한다 (`lib/gen-code-map.js`). EHR4 는 표준 기본 패키지가 없고 EHR5 도 프로젝트별 커스터마이즈가 있으므로, 고정 스냅샷보다 대상 프로젝트 실측이 정확하다. 생성 실패 시 `profiles/{PROFILE}/reference/CODE_MAP.md` fallback 스냅샷으로 대체한다 (EHR4 reference 는 `scripts/gen-example-codemap.js` 로 예시 3개 프로젝트 병합 갱신 가능).
+
+**DB_MAP.md** — 테이블 구조는 프로젝트간 표준 스키마이므로 고정 레퍼런스를 그대로 복사한다.
 
 ```bash
 REFERENCE_DIR="$PLUGIN_ROOT/profiles/$PROFILE/reference"
-if [ -f "$REFERENCE_DIR/CODE_MAP.md" ]; then
-  cp "$REFERENCE_DIR/CODE_MAP.md" CODE_MAP.md
+LIB_DIR="$PLUGIN_ROOT/skills/ehr-harness/lib"
+
+# CODE_MAP: 런타임 생성 우선, 실패 시 reference fallback
+if node "$LIB_DIR/gen-code-map.js" "$(pwd)" "$PROFILE" > CODE_MAP.md 2>/tmp/gen-code-map.err; then
+  echo "✓ CODE_MAP 생성 완료 (실제 프로젝트 기반)"
+else
+  echo "⚠ CODE_MAP 런타임 생성 실패 — reference fallback 사용" >&2
+  sed 's/^/   /' /tmp/gen-code-map.err >&2
+  if [ -f "$REFERENCE_DIR/CODE_MAP.md" ]; then
+    cp "$REFERENCE_DIR/CODE_MAP.md" CODE_MAP.md
+  fi
 fi
+
+# DB_MAP: 고정 레퍼런스 복사
 if [ -f "$REFERENCE_DIR/DB_MAP.md" ]; then
   cp "$REFERENCE_DIR/DB_MAP.md" DB_MAP.md
 fi
@@ -1459,7 +1488,8 @@ Write: .claude/agents/screen-builder.md
 Read: $PLUGIN_ROOT/profiles/$PROFILE/agents/procedure-tracer.md
 Write: .claude/agents/procedure-tracer.md
 
-# EHR4/EHR5 공통 — release-reviewer (EHR5도 신규 추가됨, 조건 분기 제거)
+# release-reviewer — 프로파일별 독립 파일 사용 ($PROFILE 에 해당하는 파일 읽기)
+# EHR4: B1~B6 매트릭스 / EHR5: B1~B10 매트릭스 (매퍼 파일명·cMap·NULL 센티넬·감사컬럼 추가)
 Read: $PLUGIN_ROOT/profiles/$PROFILE/agents/release-reviewer.md
 Write: .claude/agents/release-reviewer.md
 ```
@@ -1794,7 +1824,26 @@ fi
 
 hs_write_manifest "$MANIFEST" "$PLUGIN_VERSION" "$PROFILE" "$SOURCES_JSON" "$OUTPUTS_JSON" "$GEN_AT" "$AUTH_MODEL_JSON" "$DB_VERIFICATION_JSON" "$DDL_AUTH_JSON" "$ANALYSIS_JSON"
 
-echo "✓ HARNESS.json 갱신: plugin_version=$PLUGIN_VERSION, profile=$PROFILE"
+# 쓰기 직후 유효성 검증 — 손상된 매니페스트가 저장됐을 가능성을 즉시 감지
+# (실패 시 다음 실행에서 legacy 로 분류되어 adopt 질문이 반복되는 혼란 방지)
+HS_VALIDATE_ERR=$(mktemp 2>/dev/null || echo "/tmp/hs-validate.$$.err")
+if MANIFEST_FILE="$MANIFEST" node -e "
+  const fs = require('fs');
+  const m = JSON.parse(fs.readFileSync(process.env.MANIFEST_FILE, 'utf8'));
+  const required = ['schema_version', 'plugin_version', 'profile', 'generated_at', 'sources', 'outputs'];
+  const missing = required.filter(k => !(k in m));
+  if (missing.length) { throw new Error('missing fields: ' + missing.join(', ')); }
+  if (m.schema_version !== 3) { throw new Error('unexpected schema_version: ' + JSON.stringify(m.schema_version) + ' (expected 3)'); }
+" 2>"$HS_VALIDATE_ERR"; then
+  echo "✓ HARNESS.json 갱신 + 유효성 검증: plugin_version=$PLUGIN_VERSION, profile=$PROFILE, schema_version=3"
+else
+  echo "⚠ HARNESS.json 유효성 검증 실패 — 파일이 손상됐을 가능성" >&2
+  echo "   사유: $(cat "$HS_VALIDATE_ERR")" >&2
+  echo "   파일: $MANIFEST" >&2
+  echo "   다음 실행 시 이 매니페스트가 legacy 로 분류될 가능성이 있습니다." >&2
+  echo "   파일을 직접 열어 JSON 구조를 확인하거나, 의심스러우면 삭제 후 재생성하세요." >&2
+fi
+rm -f "$HS_VALIDATE_ERR"
 ```
 
 → 이 단계는 모든 모드(fresh / legacy adopt / stamped 업데이트)의 마지막에 무조건 한 번 실행된다.

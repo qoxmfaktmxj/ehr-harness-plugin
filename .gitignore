@@ -10,3 +10,6 @@ desktop.ini
 # 내부 설계/계획 문서 (repo에 푸시하지 않음)
 docs/superpowers/plans/
 docs/superpowers/specs/
+
+# Claude Code 세션 로그 / 상태 파일 (커밋 제외)
+.omx/

@@ -198,6 +198,159 @@ H_OUT=$(extract_section_heading "$FX/case_e_heading_distant.md" "analysis_snapsh
   && pass "extract_section_heading: 멀리 있는 헤딩 (7줄 이상) 추출" \
   || fail "extract_section_heading: 멀리 있는 헤딩 실패 (got '$H_OUT')"
 
+# ══════════════════════════════════════════════════════
+# 엣지 케이스: 교차/중첩/orphan 마커 — 명시적 에러 (exit 2) 기대
+# 이전엔 교차/중첩 시 파괴적 동작으로 문서 손상 가능했음. 이제 감지+차단.
+# ══════════════════════════════════════════════════════
+
+# ── Case F: 같은 ID 중첩 → exit 2 + stderr 경고 ──
+TGT="$TMP/f.md"
+cp "$FX/case_f_nested_same_id.md" "$TGT"
+cp "$TGT" "$TGT.bak"
+if merge_managed_section "$TGT" "$SECTION_ID" "$HEADING" "$NEW_BODY" 2>"$TMP/f.warn"; then
+  fail "Case F (같은 ID 중첩): exit 0 반환 (기대 exit 2)"
+else
+  pass "Case F (같은 ID 중첩): 에러 종료"
+fi
+grep -q "교차\|중첩" "$TMP/f.warn" \
+  && pass "Case F: stderr 에 교차/중첩 경고 출력" \
+  || fail "Case F: stderr 경고 미출력 (got: $(cat $TMP/f.warn))"
+# 파일 파괴 방지 — 원본 그대로여야
+diff -q "$TGT" "$TGT.bak" >/dev/null 2>&1 \
+  && pass "Case F: 에러 시 파일 원본 보존" \
+  || fail "Case F: 파일 변경됨 (파괴적 동작 — 기대: 원본 보존)"
+
+# ── Case G: orphan start (end 누락) → exit 2 ──
+TGT="$TMP/g.md"
+cp "$FX/case_g_orphan_start.md" "$TGT"
+cp "$TGT" "$TGT.bak"
+if merge_managed_section "$TGT" "$SECTION_ID" "$HEADING" "$NEW_BODY" 2>"$TMP/g.warn"; then
+  fail "Case G (orphan start): exit 0 반환 (기대 exit 2)"
+else
+  pass "Case G (orphan start): 에러 종료"
+fi
+grep -q "orphan" "$TMP/g.warn" \
+  && pass "Case G: stderr 에 orphan 경고" \
+  || fail "Case G: stderr 경고 미출력"
+diff -q "$TGT" "$TGT.bak" >/dev/null 2>&1 \
+  && pass "Case G: 에러 시 파일 원본 보존" \
+  || fail "Case G: 파일 변경됨"
+
+# ── Case H: orphan end (start 누락) → exit 2 ──
+TGT="$TMP/h.md"
+cp "$FX/case_h_orphan_end.md" "$TGT"
+cp "$TGT" "$TGT.bak"
+if merge_managed_section "$TGT" "$SECTION_ID" "$HEADING" "$NEW_BODY" 2>"$TMP/h.warn"; then
+  fail "Case H (orphan end): exit 0 반환 (기대 exit 2)"
+else
+  pass "Case H (orphan end): 에러 종료"
+fi
+grep -q "orphan" "$TMP/h.warn" \
+  && pass "Case H: stderr 에 orphan 경고" \
+  || fail "Case H: stderr 경고 미출력"
+diff -q "$TGT" "$TGT.bak" >/dev/null 2>&1 \
+  && pass "Case H: 에러 시 파일 원본 보존" \
+  || fail "Case H: 파일 변경됨"
+
+# ── Case I: 3쌍 중복 (non-overlapping) → 첫 쌍 유지 + 2·3쌍 제거 ──
+TGT="$TMP/i.md"
+cp "$FX/case_i_triple_duplicate.md" "$TGT"
+merge_managed_section "$TGT" "$SECTION_ID" "$HEADING" "$NEW_BODY" 2>"$TMP/i.warn"
+
+CNT=$(grep -c "<!-- HARNESS-MANAGED:analysis_snapshot -->" "$TGT")
+[ "$CNT" = "1" ] \
+  && pass "Case I (3쌍 중복): start 마커 1개만 남음" \
+  || fail "Case I: start 마커 $CNT 개 (기대 1)"
+
+CNT_END=$(grep -c "<!-- /HARNESS-MANAGED:analysis_snapshot -->" "$TGT")
+[ "$CNT_END" = "1" ] \
+  && pass "Case I (3쌍 중복): end 마커 1개만 남음" \
+  || fail "Case I: end 마커 $CNT_END 개 (기대 1)"
+
+grep -q "두 번째 쌍" "$TGT" \
+  && fail "Case I: 두 번째 쌍 본문 잔존" \
+  || pass "Case I: 두 번째 쌍 본문 제거됨"
+
+grep -q "세 번째 쌍" "$TGT" \
+  && fail "Case I: 세 번째 쌍 본문 잔존" \
+  || pass "Case I: 세 번째 쌍 본문 제거됨"
+
+grep -q "## 중간 사용자 섹션" "$TGT" \
+  && pass "Case I: 중간 사용자 섹션 보존" \
+  || fail "Case I: 중간 사용자 섹션 소실"
+
+grep -q "## 또 다른 사용자 섹션" "$TGT" \
+  && pass "Case I: 또 다른 사용자 섹션 보존" \
+  || fail "Case I: 또 다른 사용자 섹션 소실"
+
+grep -q "## 마지막 섹션" "$TGT" \
+  && pass "Case I: 마지막 섹션 보존" \
+  || fail "Case I: 마지막 섹션 소실"
+
+grep -q "3쌍\|중복" "$TMP/i.warn" \
+  && pass "Case I: stderr 에 중복 마커 경고" \
+  || fail "Case I: stderr 경고 미출력 (got: $(cat $TMP/i.warn))"
+
+# ══════════════════════════════════════════════════════
+# Windows 경로 엣지 케이스 (공백/한글)
+# 실제 symlink/junction 은 Git Bash 관리자 권한 필요 →
+#   파일 복사로 대체. 실제 symlink 는 별도 환경 검증 필요
+# ══════════════════════════════════════════════════════
+
+WIN_FX="$SCRIPT_DIR/fixtures/merge/windows_paths"
+
+# ── WP-1: 공백 포함 경로에서 merge_managed_section 정상 동작 ──
+# 시뮬레이션 경로: /tmp/dir with space/ 또는 C:/Program Files (x86)/proj/
+SPACE_DIR="$TMP/dir with space"
+mkdir -p "$SPACE_DIR"
+cp "$WIN_FX/space_path_base.md" "$SPACE_DIR/AGENTS.md"
+merge_managed_section "$SPACE_DIR/AGENTS.md" "$SECTION_ID" "$HEADING" "$NEW_BODY"
+grep -q "<!-- HARNESS-MANAGED:analysis_snapshot -->" "$SPACE_DIR/AGENTS.md" \
+  && pass "WP-1 공백경로: 마커 추가됨" \
+  || fail "WP-1 공백경로: 마커 누락 (경로에 공백 포함 시 quoting 실패 의심)"
+grep -q "## 사용자 커스텀 메모" "$SPACE_DIR/AGENTS.md" \
+  && pass "WP-1 공백경로: 사용자 섹션 보존" \
+  || fail "WP-1 공백경로: 사용자 섹션 소실"
+
+# 멱등성 — 공백 경로에서 2회 적용
+SHA_SP1=$(sha256sum "$SPACE_DIR/AGENTS.md" | cut -d' ' -f1)
+merge_managed_section "$SPACE_DIR/AGENTS.md" "$SECTION_ID" "$HEADING" "$NEW_BODY"
+SHA_SP2=$(sha256sum "$SPACE_DIR/AGENTS.md" | cut -d' ' -f1)
+[ "$SHA_SP1" = "$SHA_SP2" ] \
+  && pass "WP-1 공백경로: 멱등성" \
+  || fail "WP-1 공백경로: 멱등성 위반 ($SHA_SP1 vs $SHA_SP2)"
+
+# ── WP-2: 한글 포함 경로에서 merge_managed_section 정상 동작 ──
+# 시뮬레이션 경로: C:/사용자/홍길동/proj/ 또는 /tmp/한글폴더/
+HANGUL_DIR="$TMP/한글폴더/홍길동프로젝트"
+mkdir -p "$HANGUL_DIR"
+cp "$WIN_FX/hangul_path_base.md" "$HANGUL_DIR/AGENTS.md"
+merge_managed_section "$HANGUL_DIR/AGENTS.md" "$SECTION_ID" "$HEADING" "$NEW_BODY"
+grep -q "<!-- HARNESS-MANAGED:analysis_snapshot -->" "$HANGUL_DIR/AGENTS.md" \
+  && pass "WP-2 한글경로: 마커 추가됨" \
+  || fail "WP-2 한글경로: 마커 누락 (multibyte 경로 처리 실패 의심)"
+grep -q "분석 시각 | 2026-04-15T12:00:00" "$HANGUL_DIR/AGENTS.md" \
+  && pass "WP-2 한글경로: body 삽입됨" \
+  || fail "WP-2 한글경로: body 누락"
+
+# 멱등성 — 한글 경로에서 2회 적용
+SHA_HG1=$(sha256sum "$HANGUL_DIR/AGENTS.md" | cut -d' ' -f1)
+merge_managed_section "$HANGUL_DIR/AGENTS.md" "$SECTION_ID" "$HEADING" "$NEW_BODY"
+SHA_HG2=$(sha256sum "$HANGUL_DIR/AGENTS.md" | cut -d' ' -f1)
+[ "$SHA_HG1" = "$SHA_HG2" ] \
+  && pass "WP-2 한글경로: 멱등성" \
+  || fail "WP-2 한글경로: 멱등성 위반"
+
+# ── WP-3 (심볼릭링크 mock): 복사된 디렉토리에서 동작 확인 ──
+# 실제 symlink 는 별도 환경 검증 필요 (mklink /J 는 관리자 권한 필요)
+SYMLINK_MOCK="$TMP/symlink_mock"
+cp -r "$SCRIPT_DIR/fixtures/merge" "$SYMLINK_MOCK"
+MOCK_TGT="$SYMLINK_MOCK/case_a_no_section.md"
+merge_managed_section "$MOCK_TGT" "$SECTION_ID" "$HEADING" "$NEW_BODY"
+grep -q "<!-- HARNESS-MANAGED:analysis_snapshot -->" "$MOCK_TGT" \
+  && pass "WP-3 심볼릭링크(mock): 복사 대체 픽스처에서 merge 정상" \
+  || fail "WP-3 심볼릭링크(mock): merge 실패"
+
 echo ""
 echo "=========================================="
 echo "  PASSED: $PASS / FAILED: $FAIL"

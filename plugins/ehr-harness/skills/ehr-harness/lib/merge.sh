@@ -28,9 +28,19 @@ extract_section_body() {
     const id=process.env.ID;
     const start=`<!-- HARNESS-MANAGED:${id} -->`;
     const end=`<!-- /HARNESS-MANAGED:${id} -->`;
-    const s=src.indexOf(start);
-    const e=src.indexOf(end);
-    if(s===-1||e===-1||e<=s){process.exit(2);}
+    // 모든 start/end 위치 수집 (중첩/교차/orphan 방어)
+    const allStarts=[]; { let p=0; while((p=src.indexOf(start,p))!==-1){allStarts.push(p); p+=start.length;} }
+    const allEnds=[]; { let p=0; while((p=src.indexOf(end,p))!==-1){allEnds.push(p); p+=end.length;} }
+    if(allStarts.length===0 || allEnds.length===0) process.exit(2);
+    // orphan: start/end 개수 불일치
+    if(allStarts.length !== allEnds.length) process.exit(2);
+    // 교차/중첩/역순: 각 쌍의 start<end + 쌍 간 non-overlapping
+    for(let i=0;i<allStarts.length;i++){
+      if(allStarts[i] >= allEnds[i]) process.exit(2);
+      if(i>0 && allStarts[i] < allEnds[i-1]) process.exit(2);
+    }
+    // 첫 쌍 본문 반환
+    const s=allStarts[0]; const e=allEnds[0];
     let body=src.slice(s+start.length, e);
     if(body.startsWith("\n"))body=body.slice(1);
     if(body.endsWith("\n"))body=body.slice(0,-1);
@@ -91,8 +101,13 @@ merge_managed_section() {
     // 작업 중에는 \n 으로 통일했다가 쓰기 직전에 원래 EOL 로 복원
     src = src.replace(/\r\n/g, "\n");
 
-    // ── 중복 마커 감지: 사용자 실수로 같은 섹션 ID 의 쌍이 두 번 이상 들어온 경우
-    //    첫 쌍만 유지하고 나머지 블록은 제거(orphan 방지) + stderr 경고.
+    // ── 마커 구조 방어 검증 ──
+    // 가능 시나리오: (a) 0쌍 = 마커 없음 → 헤딩/append 분기로 넘김
+    //               (b) N쌍 non-overlapping = 정상 / 중복 → 첫 쌍만 유지
+    //               (c) 교차 (start1 < start2 < end1 < end2) → 위험, 에러
+    //               (d) 중첩 같은 ID (start1 < start2 < end2 < end1) → 모호, 에러
+    //               (e) orphan (start/end 개수 불일치) → 에러
+    //               (f) 역순 (end 가 start 보다 앞) → 에러
     const allStarts = [];
     {
       let p = 0;
@@ -103,28 +118,41 @@ merge_managed_section() {
       let p = 0;
       while ((p = src.indexOf(end, p)) !== -1) { allEnds.push(p); p += end.length; }
     }
-    if (allStarts.length > 1 || allEnds.length > 1) {
-      process.stderr.write(
-        `merge_managed_section: 중복 마커 감지 (${id}) — start ${allStarts.length}, end ${allEnds.length}. 첫 쌍만 유지하고 나머지 제거.\n`
-      );
-      // 역순으로 여분 블록 제거 (뒤에서부터 지워야 앞 인덱스가 유효)
-      const extras = [];
-      const pairCount = Math.min(allStarts.length, allEnds.length);
-      for (let i = 1; i < pairCount; i++) {
-        if (allEnds[i] > allStarts[i]) {
-          extras.push({ s: allStarts[i], e: allEnds[i] + end.length });
+
+    if (allStarts.length > 0 || allEnds.length > 0) {
+      if (allStarts.length !== allEnds.length) {
+        process.stderr.write(
+          `merge_managed_section: orphan 마커 감지 (${id}) — start ${allStarts.length}, end ${allEnds.length}개. 파일을 직접 확인 후 수동 수정하세요.\n  파일: ${file}\n`
+        );
+        process.exit(2);
+      }
+      for (let i = 0; i < allStarts.length; i++) {
+        if (allStarts[i] >= allEnds[i]) {
+          process.stderr.write(
+            `merge_managed_section: 역순 마커 감지 (${id}) — 쌍 ${i+1}: start @${allStarts[i]} >= end @${allEnds[i]}. 파일 수동 확인 필요.\n  파일: ${file}\n`
+          );
+          process.exit(2);
+        }
+        if (i > 0 && allStarts[i] < allEnds[i-1]) {
+          process.stderr.write(
+            `merge_managed_section: 교차/중첩 마커 감지 (${id}) — 쌍 ${i+1}의 start(${allStarts[i]}) < 쌍 ${i}의 end(${allEnds[i-1]}). 같은 ID로 중첩됐거나 쌍이 교차된 구조입니다. 파일 수동 확인 필요.\n  파일: ${file}\n`
+          );
+          process.exit(2);
         }
       }
-      // 짝 없는 여분 마커도 제거
-      for (let i = pairCount; i < allStarts.length; i++) {
-        extras.push({ s: allStarts[i], e: allStarts[i] + start.length });
-      }
-      for (let i = pairCount; i < allEnds.length; i++) {
-        extras.push({ s: allEnds[i], e: allEnds[i] + end.length });
-      }
-      extras.sort((a, b) => b.s - a.s);
-      for (const ex of extras) {
-        src = src.slice(0, ex.s) + src.slice(ex.e);
+      // non-overlapping N쌍: 중복이면 첫 쌍만 유지, 나머지 제거
+      if (allStarts.length > 1) {
+        process.stderr.write(
+          `merge_managed_section: 중복 마커 감지 (${id}) — 총 ${allStarts.length}쌍. 첫 쌍만 유지하고 나머지 제거.\n`
+        );
+        const extras = [];
+        for (let i = 1; i < allStarts.length; i++) {
+          extras.push({ s: allStarts[i], e: allEnds[i] + end.length });
+        }
+        extras.sort((a, b) => b.s - a.s);
+        for (const ex of extras) {
+          src = src.slice(0, ex.s) + src.slice(ex.e);
+        }
       }
     }
 
