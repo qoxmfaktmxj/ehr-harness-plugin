@@ -1016,8 +1016,8 @@ $1|$2|$3|$4"
   add "profiles/$PROFILE/skeleton/CLAUDE.md.skel" "$PLUGIN_ROOT/profiles/$PROFILE/skeleton/CLAUDE.md.skel" "CLAUDE.md" "CLAUDE.md"
   add "profiles/$PROFILE/skeleton/README.md.skel" "$PLUGIN_ROOT/profiles/$PROFILE/skeleton/README.md.skel" "README.md" "README.md"
 
-  # 스킬 (5개 + 디자인 가이드)
-  for s in domain-knowledge screen-builder codebase-navigator procedure-tracer db-query; do
+  # 스킬 (6개 + 디자인 가이드)
+  for s in domain-knowledge screen-builder codebase-navigator procedure-tracer db-query impact-analyzer; do
     src_dir="$PLUGIN_ROOT/profiles/$PROFILE/skills/$s"
     if [ -f "$src_dir/SKILL.md.skel" ]; then
       src_file="$src_dir/SKILL.md.skel"
@@ -1567,6 +1567,15 @@ Read: $PLUGIN_ROOT/profiles/$PROFILE/skills/db-query/SKILL.md.skel
 Write: .claude/skills/ehr-db-query/SKILL.md
 ```
 
+```
+# ehr-impact-analyzer — 스켈레톤 + 프로시저/트리거 목록 (procedure-tracer 재사용)
+Read: $PLUGIN_ROOT/profiles/$PROFILE/skills/impact-analyzer/SKILL.md.skel
+치환:
+  {{PROC_LIST}} → Step 2-H 전체 프로시저 목록
+  {{TRIGGER_LIST}} → Step 2-H 전체 트리거 목록 (또는 DB 미연결 경고)
+Write: .claude/skills/ehr-impact-analyzer/SKILL.md
+```
+
 ### 3-D. 에이전트 (agents/ → .claude/agents/)
 
 ```
@@ -1587,7 +1596,7 @@ Write: .claude/agents/release-reviewer.md
 
 ```
 # .agents/skills/ ← .claude/skills/ 전체 복사
-SKILLS_TO_COPY="ehr-screen-builder ehr-codebase-navigator ehr-procedure-tracer ehr-db-query ehr-domain-knowledge"
+SKILLS_TO_COPY="ehr-screen-builder ehr-codebase-navigator ehr-procedure-tracer ehr-db-query ehr-domain-knowledge ehr-impact-analyzer"
 # 디자인 가이드 스킬이 생성됐다면 함께 복사
 if [ "$DESIGN_GUIDE" = "true" ]; then
   SKILLS_TO_COPY="$SKILLS_TO_COPY ehr-design-guide"
@@ -1608,6 +1617,7 @@ Write: GEMINI.md
 @./.agents/skills/ehr-screen-builder/SKILL.md
 @./.agents/skills/ehr-procedure-tracer/SKILL.md
 @./.agents/skills/ehr-db-query/SKILL.md
+@./.agents/skills/ehr-impact-analyzer/SKILL.md
 # 디자인 가이드 있으면 추가
 if [ "$DESIGN_GUIDE" = "true" ]; then
   추가 라인: @./.agents/skills/ehr-design-guide/SKILL.md
@@ -1846,7 +1856,7 @@ HARNESS_MODE: {{HARNESS_MODE}}
 | EHR 버전 | {{PROFILE}} |
 | 시스템명 | {{SYSTEM_NAME}} |
 | 모듈 수 | X개 |
-| 스킬 | 5~6개 (디자인 가이드 존재 시 6) |
+| 스킬 | 6~7개 (디자인 가이드 존재 시 7) |
 | 에이전트 | 2~3개 |
 | 프로시저 | X개 등록 |
 | 트리거 | X개 등록 |
