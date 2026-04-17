@@ -247,7 +247,7 @@ cd /path/to/ehr-project
 | 7 | `.claude/hooks/vcs-no-commit.sh` | ~30줄 | Git/SVN 커밋·푸시 차단 훅. AI는 코드 수정까지만 수행. |
 | 8 | `.claude/agents/screen-builder.md` | ~80줄 | 화면 생성 에이전트 시스템 프롬프트. |
 | 9 | `.claude/agents/procedure-tracer.md` | ~150줄 | 프로시저 분석 에이전트. |
-| 10 | `.claude/agents/release-reviewer.md` | ~300줄 | 릴리즈 검증 + 회귀 판정 에이전트 (EHR4/EHR5 공통). 감별된 auth_model/db_verification에 따라 B1~B10 조건부 체크. |
+| 10 | `.claude/agents/release-reviewer.md` | EHR4 ~180줄 / EHR5 ~300줄 | 릴리즈 검증 + 회귀 판정 에이전트 (**프로파일별 독립**: EHR4 는 B1~B6, EHR5 는 B1~B10 경계면 매트릭스). 도메인 지식은 유사하되 기술 스택이 다르므로 파일 내용이 다름. 감별된 auth_model/db_verification에 따라 조건부 체크. |
 | 11 | `.claude/skills/domain-knowledge/SKILL.md` | ~400-750줄 | 도메인 지식 레퍼런스. |
 | 12 | `.claude/skills/screen-builder/SKILL.md` | ~400줄 | 화면 생성 코드 템플릿. |
 | 13 | `.claude/skills/codebase-navigator/SKILL.md` | ~200줄 | 코드 경로 탐색. |
@@ -388,7 +388,7 @@ Codex CLI:
 |----------|------|----------|
 | screen-builder.md | 역할, 실행 절차, 코드 패턴, 제약 | 고정 (프로파일별) |
 | procedure-tracer.md | 역할, 7-Layer, 추적 알고리즘, 치명 목록 | 고정 + **실측** (치명 목록) |
-| release-reviewer.md | B1~B10 경계, 회귀 패턴, 5개 치명 위험, CHECK 판정 (EHR4/EHR5 공통, auth_model 기반 조건부) | 고정 |
+| release-reviewer.md | 경계면 매트릭스·회귀 패턴·치명 위험·CHECK 판정 (**프로파일별 독립**: EHR4 B1~B6 / EHR5 B1~B10, auth_model 기반 조건부) | 고정 |
 
 ---
 
@@ -552,7 +552,7 @@ find . -name "ojdbc*.jar" -o -name "tibero*.jar" 2>/dev/null
 4. 에이전트 (agents/ → .claude/agents/)
    screen-builder.md ← 프로파일별 고정
    procedure-tracer.md ← 고정 + 치명 목록 주입
-   release-reviewer.md ← EHR4/EHR5 공통 (조건부 체크 매트릭스)
+   release-reviewer.md ← 프로파일별 독립 (EHR4 B1~B6 / EHR5 B1~B10, 조건부 체크 매트릭스)
 
 5. Codex/Gemini 호환
    .agents/skills/ ← .claude/skills/ 전체 복사
@@ -683,7 +683,7 @@ profiles/
 - Velocity 문법 레퍼런스 (EHR4)
 - 금지 사항 목록
 - 그린필드 금지 원칙
-- B1~B10 경계 검증 매트릭스 + CHECK 판정 (EHR4/EHR5 공통)
+- 경계 검증 매트릭스 + CHECK 판정 (**프로파일별**: EHR4 B1~B6, EHR5 B1~B10)
 - 에이전트 역할 정의
 - db-read-only 훅 + vcs-no-commit 훅
 
@@ -720,7 +720,18 @@ ehr-harness-plugin/
 │       │
 │       ├── skills/
 │       │   └── ehr-harness/
-│       │       └── SKILL.md      # 메타 스킬 (이 플러그인의 핵심)
+│       │       ├── SKILL.md      # 메타 스킬 (이 플러그인의 핵심)
+│       │       └── lib/          # 런타임 helper (SKILL.md 가 Step 실행 중 호출)
+│       │           ├── detect.sh         # EHR 버전 / auth_model / DDL 폴더 감별
+│       │           ├── analyze.sh        # 프로젝트 분석 (모듈·세션변수·프로시저·law count)
+│       │           ├── audit.sh          # drift 계산·리포트 렌더 (compute_drift / drift_importance)
+│       │           ├── merge.sh          # AGENTS.md / CLAUDE.md 섹션 단위 병합 (사용자 편집 보존)
+│       │           ├── harness-state.sh  # HARNESS.json v3 매니페스트 관리
+│       │           ├── gen-code-map.js   # 대상 프로젝트 CODE_MAP 런타임 생성 (Step 2-L-2)
+│       │           └── *.test.sh         # 단위 테스트
+│       │
+│       ├── scripts/              # offline 유지보수 도구 (런타임 미사용)
+│       │   └── gen-example-codemap.js    # EHR4 예시 병합 CODE_MAP 스냅샷 생성 (fallback 용)
 │       │
 │       └── profiles/
 │           ├── shared/           # 버전 무관 공통 파일
@@ -732,7 +743,7 @@ ehr-harness-plugin/
 │           │   │   └── config.toml      # Codex CLI 설정
 │           │   └── .gitignore
 │           │
-│           ├── ehr4/             # EHR4 프로파일
+│           ├── ehr4/             # EHR4 프로파일 (Ant + Anyframe + Spring MVC)
 │           │   ├── skeleton/     # 변수 치환용 문서 스켈레톤
 │           │   │   ├── AGENTS.md.skel
 │           │   │   ├── CLAUDE.md.skel
@@ -740,18 +751,22 @@ ehr-harness-plugin/
 │           │   ├── agents/       # 에이전트 (3개)
 │           │   │   ├── screen-builder.md
 │           │   │   ├── procedure-tracer.md
-│           │   │   └── release-reviewer.md   # 릴리즈 검증 (조건부)
-│           │   └── skills/       # 스킬 (5개)
-│           │       ├── screen-builder/SKILL.md.skel
-│           │       ├── codebase-navigator/SKILL.md.skel
-│           │       ├── procedure-tracer/SKILL.md.skel
-│           │       ├── db-query/SKILL.md.skel
-│           │       └── domain-knowledge/SKILL.md
+│           │   │   └── release-reviewer.md   # 릴리즈 검증 (B1~B6 EHR4 기준)
+│           │   ├── skills/       # 스킬 (5개 + design-guide 는 프로젝트에 Storybook 있을 때만 생성됨)
+│           │   │   ├── screen-builder/SKILL.md.skel
+│           │   │   ├── codebase-navigator/SKILL.md.skel
+│           │   │   ├── procedure-tracer/SKILL.md.skel
+│           │   │   ├── db-query/SKILL.md.skel
+│           │   │   └── domain-knowledge/SKILL.md
+│           │   └── reference/    # 고정 참조 문서
+│           │       ├── CODE_MAP.md   # 예시 3개 프로젝트 병합 (런타임 생성 실패 시 fallback)
+│           │       └── DB_MAP.md     # 테이블 스키마 레퍼런스
 │           │
-│           └── ehr5/             # EHR5 프로파일 (동일 구조)
+│           └── ehr5/             # EHR5 프로파일 (Maven + MyBatis + Spring Boot)
 │               ├── skeleton/
-│               ├── agents/       # 에이전트 (3개, release-reviewer 포함)
-│               └── skills/       # 스킬 (5개)
+│               ├── agents/       # 에이전트 (3개, release-reviewer 는 B1~B10)
+│               ├── skills/       # 스킬 (5개 + design-guide 는 프로젝트에 Storybook 있을 때만 생성됨)
+│               └── reference/    # CODE_MAP.md (기본 패키지 스냅샷, fallback), DB_MAP.md
 │
 ├── README.md                     # 이 파일
 └── .gitignore

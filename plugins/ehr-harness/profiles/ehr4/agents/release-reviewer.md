@@ -142,6 +142,7 @@ auth_injection_methods 비어있으면 → ssnEnterCd WHERE 필터 유무만 체
   - MERGE 첫 행 NULL 센티넬 존재
   - DELETE 첫 행 (NULL, NULL) 센티넬 존재
   - CHKDATE = SYSDATE, CHKID = :ssnSabun 감사 컬럼 존재
+  - 배치 건수 50건 초과 시 Velocity #foreach 분할 처리 확인 (EHR4 Anyframe 바인드 변수 한계 — 50건 이상 단일 MERGE/INSERT 는 SQLException 유발)
 
 이탈 시: FIX
 ```
@@ -229,7 +230,7 @@ auth_injection_methods 비어있으면 → ssnEnterCd WHERE 필터 유무만 체
 
 ### R4: i18n 다국어 이슈
 ```
-대상: F_COM_GET_LANGUAGE_MAPPING (158개 위치)
+대상: F_COM_GET_LANGUAGE_MAPPING (프로젝트 실측 위치 수)
 판정:
   - Language 메시지 키 변경/삭제 → Conditional-Go (영향 범위 확인 필요)
   - 영어 하드코딩 에러 메시지 추가 → FIX
