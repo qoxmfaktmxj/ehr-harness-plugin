@@ -191,6 +191,17 @@ AI는 위 모든 오브젝트를 직접 수정하지 않는다.
 - 회사 코드 하드코딩 (반드시 `#{ssnEnterCd}` 바인드)
 - 그린필드 구현 (반드시 기존 화면을 복제 베이스로)
 
+## 스킬 목록
+
+이 프로젝트에 설치된 도메인 스킬. 각 스킬 파일은 `.claude/skills/` 아래에 위치한다.
+
+- `.claude/skills/ehr-domain-knowledge/SKILL.md` — EHR 도메인 지식 (법칙·권한·패턴)
+- `.claude/skills/ehr-screen-builder/SKILL.md` — 화면 생성 템플릿 (CRUD 코드 예시 포함)
+- `.claude/skills/ehr-codebase-navigator/SKILL.md` — 코드 경로 탐색 + 모듈 맵
+- `.claude/skills/ehr-procedure-tracer/SKILL.md` — 프로시저 체인 분석 + 동적 SQL 추적
+- `.claude/skills/ehr-db-query/SKILL.md` — DB 조회 (SELECT 전용)
+- `.claude/skills/ehr-impact-analyzer/SKILL.md` — 변경 전 영향도 예측 + 수정 권고 판정
+
 ## 참고: DB_Object 없음
 
 프로시저/함수/트리거 소스 파일이 이 레포에 없다. Oracle에만 존재한다.
