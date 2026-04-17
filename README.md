@@ -253,9 +253,10 @@ cd /path/to/ehr-project
 | 13 | `.claude/skills/codebase-navigator/SKILL.md` | ~200줄 | 코드 경로 탐색. |
 | 14 | `.claude/skills/procedure-tracer/SKILL.md` | ~300줄 | 프로시저 추적. |
 | 15 | `.claude/skills/db-query/SKILL.md` | ~200줄 | DB 조회 가이드. |
-| 16 | `.agents/skills/` | — | 위 5개 스킬의 Codex 호환 복사본. |
-| 17 | `.codex/config.toml` | ~5줄 | Codex CLI 설정. |
-| 18 | `.gitignore` | ~15줄 | 런타임 산출물 제외. |
+| 16 | `.claude/skills/impact-analyzer/SKILL.md` | ~500줄 | 변경 전 영향도 예측 + HOLD·STOP/HOLD/Conditional-Go/Go 판정 + CHECK 병기. |
+| 17 | `.agents/skills/` | — | 위 6개 스킬의 Codex 호환 복사본. |
+| 18 | `.codex/config.toml` | ~5줄 | Codex CLI 설정. |
+| 19 | `.gitignore` | ~15줄 | 런타임 산출물 제외. |
 
 ### 플랫폼별 역할
 
@@ -380,7 +381,21 @@ Codex CLI:
 | 공통 쿼리 패턴 5개 | 프로시저 소스, 테이블 구조 등 | 고정 |
 | UPDATE 안전 템플릿 | 변경 전 SELECT → UPDATE → 변경 후 검증 3단계 | 고정 |
 
-### 5-8. 에이전트 (.claude/agents/)
+### 5-8. impact-analyzer SKILL.md — 변경 전 영향도 예측
+
+**생성 기준**: procedure-tracer 재사용 + 위험 신호 스코어링 규칙.
+
+| 섹션 | 내용 | 고정/실측 |
+|------|------|----------|
+| Step 1 입력 판별 | 9가지 정규식 우선순위 | 고정 |
+| Step 2 체인 추적 | procedure-tracer SKILL 참조 | 고정 |
+| Step 3 위험 신호 | critical_proc_found + 재구현 금지 + 권한 경계 + Family C | 고정 + **실측** (critical_proc_found 주입) |
+| Step 4 Unresolved refs | 동적 queryId·AJAX·EXECUTE IMMEDIATE·F_COM_GET_SQL_MAP | 고정 |
+| Step 5 영향 화면 수렴 | 종점 JSP, 상한 10 | 고정 |
+| Step 6 판정 | HOLD·STOP / HOLD / Conditional-Go / Go + CHECK | 고정 |
+| Step 7 리포트 템플릿 | 표준 + 공용 STOP | 고정 |
+
+### 5-9. 에이전트 (.claude/agents/)
 
 **생성 기준**: 에이전트는 스킬을 참조하므로 대부분 고정.
 
@@ -563,7 +578,7 @@ find . -name "ojdbc*.jar" -o -name "tibero*.jar" 2>/dev/null
 
 ```
 1. 생성 파일 수 확인
-   EHR4/EHR5: 19개 파일 (5 스킬 × 2 복사본 + 3 에이전트 + 6 문서/설정)
+   EHR4/EHR5: 21개 파일 (6 스킬 × 2 복사본 + 3 에이전트 + 6 문서/설정 + 1 .agents/skills/)
 
 2. AGENTS.md 교차 확인
    모듈 맵의 모듈 목록 vs 실제 디렉토리 목록 비교
@@ -752,11 +767,12 @@ ehr-harness-plugin/
 │           │   │   ├── screen-builder.md
 │           │   │   ├── procedure-tracer.md
 │           │   │   └── release-reviewer.md   # 릴리즈 검증 (B1~B6 EHR4 기준)
-│           │   ├── skills/       # 스킬 (5개 + design-guide 는 프로젝트에 Storybook 있을 때만 생성됨)
+│           │   ├── skills/       # 스킬 (6개 + design-guide 는 프로젝트에 Storybook 있을 때만 생성됨)
 │           │   │   ├── screen-builder/SKILL.md.skel
 │           │   │   ├── codebase-navigator/SKILL.md.skel
 │           │   │   ├── procedure-tracer/SKILL.md.skel
 │           │   │   ├── db-query/SKILL.md.skel
+│           │   │   ├── impact-analyzer/SKILL.md.skel
 │           │   │   └── domain-knowledge/SKILL.md
 │           │   └── reference/    # 고정 참조 문서
 │           │       ├── CODE_MAP.md   # 예시 3개 프로젝트 병합 (런타임 생성 실패 시 fallback)
@@ -765,7 +781,7 @@ ehr-harness-plugin/
 │           └── ehr5/             # EHR5 프로파일 (Maven + MyBatis + Spring Boot)
 │               ├── skeleton/
 │               ├── agents/       # 에이전트 (3개, release-reviewer 는 B1~B10)
-│               ├── skills/       # 스킬 (5개 + design-guide 는 프로젝트에 Storybook 있을 때만 생성됨)
+│               ├── skills/       # 스킬 (6개 + design-guide 는 프로젝트에 Storybook 있을 때만 생성됨)
 │               └── reference/    # CODE_MAP.md (기본 패키지 스냅샷, fallback), DB_MAP.md
 │
 ├── README.md                     # 이 파일
