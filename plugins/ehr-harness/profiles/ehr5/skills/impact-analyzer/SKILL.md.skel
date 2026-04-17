@@ -77,6 +77,28 @@ DB_MODE=$(cat .claude/skills/ehr-db-query/DB_MODE 2>/dev/null || echo "code-only
 - 공용 JS: 파일명 `common.js` / 경로 `src/main/webapp/resources/js/common/` 하위
 - 공용 include JSP: `src/main/webapp/WEB-INF/jsp/common/` 하위 또는 파일명에 `header|footer|layout|top|bottom|nav` 포함
 
+### 변수 바인딩 (Step 2~7 전제)
+
+```bash
+# Step 1 완료 후 아래 변수들을 Step 2~7 에서 참조하는 canonical code 로 고정
+INPUT_BASENAME=$(basename "$INPUT")
+
+# INPUT_TYPE ∈ {proc, table, url, mapper, ctrl, svc, jsp, js, queryid}
+# 우선순위 테이블 각 행과 매핑:
+#   1 P_/PKG_     → INPUT_TYPE=proc
+#   2 T...        → INPUT_TYPE=table
+#   3 /.do        → INPUT_TYPE=url
+#   4 mapper XML  → INPUT_TYPE=mapper
+#   5 Controller  → INPUT_TYPE=ctrl
+#   6 Service     → INPUT_TYPE=svc
+#   7 *.jsp       → INPUT_TYPE=jsp
+#   8 *.js        → INPUT_TYPE=js
+#   9 queryId     → INPUT_TYPE=queryid
+
+# IS_COMMON_FILE (0 또는 1) — 공용 파일 판별 기준 결과
+# Step 5 조기 컷 + Step 6 공용 판정에 사용
+```
+
 ---
 
 ## Step 2: 체인 추적
@@ -352,7 +374,7 @@ if [ "$VERDICT" != "HOLD·STOP" ]; then
   elif [ "$SIGNAL_CPN_TRIGGER" = "1" ]; then
     VERDICT="HOLD"
     VERDICT_REASON+=("CPN 트리거 연관")
-  elif [ "$SIGNAL_AUTH_BOUNDARY" = "1" ] && [ "$INPUT_TYPE" = "xml" ]; then
+  elif [ "$SIGNAL_AUTH_BOUNDARY" = "1" ] && [ "$INPUT_TYPE" = "mapper" ]; then
     VERDICT="HOLD"
     VERDICT_REASON+=("권한 경계 \${query} 쿼리 직접 수정")
   fi
