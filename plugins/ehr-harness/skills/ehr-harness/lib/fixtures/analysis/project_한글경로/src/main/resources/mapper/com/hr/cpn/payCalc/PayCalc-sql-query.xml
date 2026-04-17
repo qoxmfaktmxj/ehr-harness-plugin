@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapper namespace="cpn.payCalc">
+  <update id="prcPayCalc">
+    CALL P_CPN_CAL_PAY_MAIN(#{enterCd, mode=IN}, #{sqlCode, mode=OUT}, #{sqlErrm, mode=OUT})
+  </update>
+</mapper>

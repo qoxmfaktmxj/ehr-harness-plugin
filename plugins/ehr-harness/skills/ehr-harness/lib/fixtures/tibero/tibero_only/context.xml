@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans">
+  <!-- Tibero 전용 dataSource -->
+  <bean id="dataSource" class="org.apache.commons.dbcp.BasicDataSource">
+    <property name="driverClassName" value="com.tmax.tibero.jdbc.TbDriver"/>
+    <property name="url" value="jdbc:tibero:thin:@192.168.1.20:8629:TIBERO"/>
+    <property name="username" value="ehruser"/>
+    <property name="password" value="secret"/>
+  </bean>
+</beans>

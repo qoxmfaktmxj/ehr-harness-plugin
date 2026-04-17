@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans">
+  <!-- DB 접속 설정 없음 — 메시지 큐 전용 빈만 포함 -->
+  <bean id="messageQueue" class="com.example.MessageQueue">
+    <property name="host" value="localhost"/>
+    <property name="port" value="5672"/>
+  </bean>
+</beans>

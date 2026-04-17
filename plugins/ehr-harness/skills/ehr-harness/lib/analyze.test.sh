@@ -162,4 +162,49 @@ echo "$RESULT" | grep -qE '"analyzed_at":"[0-9]{4}-[0-9]{2}-[0-9]{2}T' \
   && pass "build_analysis_json: analyzed_at ISO 8601" \
   || fail "build_analysis_json: analyzed_at 형식 이상 ($RESULT)"
 
+# ══════════════════════════════════════════════════════
+# Windows 경로 엣지 케이스 (공백/한글)
+# 실제 symlink/junction 은 Git Bash 관리자 권한 필요 →
+#   파일 복사로 대체. 실제 symlink 는 별도 환경 검증 필요
+# ══════════════════════════════════════════════════════
+
+# ── WP-1: 공백 포함 경로에서 collect_module_map 동작 ──
+# 시뮬레이션 경로: C:/Program Files (x86)/proj/
+SPACE_FX="$FX/analysis/project_space path"
+RESULT=$(collect_module_map "$SPACE_FX" "ehr5")
+echo "$RESULT" | grep -q '"name":"hrm"' \
+  && pass "WP-1 공백경로: collect_module_map hrm 감지" \
+  || fail "WP-1 공백경로: collect_module_map 실패 (경로 quoting 문제 의심) ($RESULT)"
+echo "$RESULT" | grep -q '"name":"cpn"' \
+  && pass "WP-1 공백경로: collect_module_map cpn 감지" \
+  || fail "WP-1 공백경로: collect_module_map cpn 누락 ($RESULT)"
+
+# build_analysis_json 도 공백 경로에서 동작해야 함
+RESULT=$(build_analysis_json "$SPACE_FX" "ehr5")
+echo "$RESULT" | grep -qE '"analyzed_at":"[0-9]{4}-[0-9]{2}-[0-9]{2}T' \
+  && pass "WP-1 공백경로: build_analysis_json 정상 반환" \
+  || fail "WP-1 공백경로: build_analysis_json 실패 ($RESULT)"
+
+# ── WP-2: 한글 포함 경로에서 collect_module_map 동작 ──
+# 시뮬레이션 경로: C:/사용자/홍길동/proj/ 또는 /tmp/한글폴더/
+HANGUL_FX="$FX/analysis/project_한글경로"
+RESULT=$(collect_module_map "$HANGUL_FX" "ehr5")
+echo "$RESULT" | grep -q '"name":"hrm"' \
+  && pass "WP-2 한글경로: collect_module_map hrm 감지" \
+  || fail "WP-2 한글경로: collect_module_map 실패 (multibyte 경로 문제 의심) ($RESULT)"
+
+# build_analysis_json 도 한글 경로에서 동작해야 함
+RESULT=$(build_analysis_json "$HANGUL_FX" "ehr5")
+echo "$RESULT" | grep -qE '"analyzed_at":"[0-9]{4}-[0-9]{2}-[0-9]{2}T' \
+  && pass "WP-2 한글경로: build_analysis_json 정상 반환" \
+  || fail "WP-2 한글경로: build_analysis_json 실패 ($RESULT)"
+
+# ── WP-3 (심볼릭링크 mock): 복사된 프로젝트에서 동작 확인 ──
+# 실제 symlink 는 별도 환경 검증 필요 (mklink /J 는 관리자 권한 필요)
+MOCK_FX="$FX/analysis/project_space path"
+RESULT=$(collect_session_vars "$MOCK_FX" "ehr5")
+echo "$RESULT" | grep -q '"ssnEnterCd"' \
+  && pass "WP-3 심볼릭링크(mock): collect_session_vars 정상 (복사 대체 픽스처)" \
+  || fail "WP-3 심볼릭링크(mock): collect_session_vars 실패 ($RESULT)"
+
 echo "ALL ANALYZE TESTS PASSED (Task 6)"

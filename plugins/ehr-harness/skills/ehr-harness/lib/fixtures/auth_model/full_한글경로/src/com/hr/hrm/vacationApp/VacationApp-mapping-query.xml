@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<queryservice>
+  <query id="getVacationAppList">
+    <statement>
+      SELECT * FROM TXXX A
+       WHERE A.ENTER_CD = :ssnEnterCd
+      INNER JOIN ($query) AUTH ON AUTH.SABUN = A.SABUN
+      INNER JOIN THRM151_AUTH B ON B.AUTH_ID = :ssnAuthId
+      AND A.STATUS = F_COM_GET_SQL_AUTH(:ssnSabun)
+    </statement>
+  </query>
+</queryservice>

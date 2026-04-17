@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapper namespace="hri.approval">
+  <update id="prcApprovalAfter">
+    CALL P_HRI_AFTER_PROC_EXEC(#{applCd}, #{sqlCode, mode=OUT})
+  </update>
+  <update id="prcPathAuto">
+    CALL P_HRI_APP_PATH_INS_AUTO_ALL(#{enterCd})
+  </update>
+</mapper>

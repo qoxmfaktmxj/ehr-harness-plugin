@@ -279,4 +279,62 @@ else
 fi
 rm -rf "$TMP_A"
 
+# ══════════════════════════════════════════════════════
+# Windows 경로 엣지 케이스 (공백/한글)
+# 실제 symlink/junction 은 Git Bash 관리자 권한 필요 →
+#   파일 복사로 대체. 실제 symlink 는 별도 환경 검증 필요
+# ══════════════════════════════════════════════════════
+
+# ── WP-1: 공백 포함 경로에서 hs_sha256 동작 ──
+# 시뮬레이션 경로: C:/Program Files (x86)/
+SPACE_DIR="$TMP/dir with space"
+mkdir -p "$SPACE_DIR"
+echo "hello" > "$SPACE_DIR/sample.txt"
+sha_sp=$(hs_sha256 "$SPACE_DIR/sample.txt")
+case "$sha_sp" in
+  sha256:*) pass "WP-1 공백경로: hs_sha256 prefix 정상" ;;
+  *)        fail "WP-1 공백경로: hs_sha256 실패 — 경로 quoting 문제 의심 (got: $sha_sp)" ;;
+esac
+
+# hs_write_manifest + hs_is_legacy 공백 경로 검증
+hs_write_manifest "$SPACE_DIR/HARNESS.json" "1.0.0" "ehr5" '{}' '{}'
+if hs_is_legacy "$SPACE_DIR/HARNESS.json"; then
+  fail "WP-1 공백경로: hs_is_legacy — v3 매니페스트가 legacy 로 분류됨"
+else
+  pass "WP-1 공백경로: hs_write_manifest + hs_is_legacy (공백 경로)"
+fi
+
+# ── WP-2: 한글 포함 경로에서 hs_sha256 동작 ──
+# 시뮬레이션 경로: C:/사용자/홍길동/
+HANGUL_DIR="$TMP/한글폴더/홍길동"
+mkdir -p "$HANGUL_DIR"
+echo "hello" > "$HANGUL_DIR/sample.txt"
+sha_hg=$(hs_sha256 "$HANGUL_DIR/sample.txt")
+case "$sha_hg" in
+  sha256:*) pass "WP-2 한글경로: hs_sha256 prefix 정상" ;;
+  *)        fail "WP-2 한글경로: hs_sha256 실패 — multibyte 경로 처리 의심 (got: $sha_hg)" ;;
+esac
+
+# 동일 내용 → sha 일치 (공백 경로 기준 sha 와 동일해야 함)
+[ "$sha_sp" = "$sha_hg" ] \
+  && pass "WP-2 한글경로: sha256 동일 내용 결과 일치" \
+  || fail "WP-2 한글경로: sha256 결과 불일치 ($sha_sp vs $sha_hg)"
+
+# hs_write_manifest + hs_get_profile 한글 경로 검증
+hs_write_manifest "$HANGUL_DIR/HARNESS.json" "1.0.0" "ehr5" '{}' '{}'
+prof_hg=$(hs_get_profile "$HANGUL_DIR/HARNESS.json")
+[ "$prof_hg" = "ehr5" ] \
+  && pass "WP-2 한글경로: hs_get_profile 정상" \
+  || fail "WP-2 한글경로: hs_get_profile 실패 (got: $prof_hg)"
+
+# ── WP-3 (심볼릭링크 mock): 복사된 매니페스트에서 동작 확인 ──
+# 실제 symlink 는 별도 환경 검증 필요 (mklink /J 는 관리자 권한 필요)
+MOCK_DIR="$TMP/symlink_mock_hs"
+mkdir -p "$MOCK_DIR"
+cp "$FIXTURES/harness-v3.json" "$MOCK_DIR/harness-v3.json"
+out_mock=$(hs_get_output_sha "$MOCK_DIR/harness-v3.json" ".claude/settings.json")
+[ "$out_mock" = "sha256:aaa" ] \
+  && pass "WP-3 심볼릭링크(mock): hs_get_output_sha 정상 (복사 대체 픽스처)" \
+  || fail "WP-3 심볼릭링크(mock): hs_get_output_sha 실패 (got: $out_mock)"
+
 echo "ALL TESTS PASSED"

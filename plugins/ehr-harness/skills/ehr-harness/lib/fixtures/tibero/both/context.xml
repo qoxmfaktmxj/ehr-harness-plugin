@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans">
+  <!-- Tibero primary dataSource (Tibero 우선, Oracle fallback 주석으로 병기) -->
+  <bean id="dataSource" class="org.apache.commons.dbcp.BasicDataSource">
+    <property name="driverClassName" value="com.tmax.tibero.jdbc.TbDriver"/>
+    <property name="url" value="jdbc:tibero:thin:@192.168.1.20:8629:TIBERO"/>
+    <property name="username" value="ehruser"/>
+    <property name="password" value="secret"/>
+  </bean>
+
+  <!-- Oracle legacy — 마이그레이션 전 구성 (주석 처리) -->
+  <!--
+  <bean id="legacyDataSource" class="org.apache.commons.dbcp.BasicDataSource">
+    <property name="url" value="jdbc:oracle:thin:@192.168.1.10:1521:EHRDB"/>
+  </bean>
+  -->
+</beans>
