@@ -74,9 +74,6 @@ public class NewScreenController {
     @Autowired
     private NewScreenService newScreenService;
 
-    @Autowired
-    private AuthTableService authTableService;
-
     // 뷰 매핑
     @RequestMapping(params = "cmd=viewNewScreen")
     public String viewNewScreen() throws Exception {
@@ -94,13 +91,6 @@ public class NewScreenController {
         paramMap.put("ssnSabun",   session.getAttribute("ssnSabun"));
         paramMap.put("ssnSearchType", session.getAttribute("ssnSearchType"));
         paramMap.put("ssnGrpCd",  session.getAttribute("ssnGrpCd"));
-
-        // 권한 쿼리 주입 (필요 시)
-        paramMap.put("authSqlID", "THRM151");
-        Map<?, ?> query = authTableService.getAuthQueryMap(paramMap);
-        if (query != null) {
-            paramMap.put("query", query.get("query"));
-        }
 
         List<?> list = new ArrayList<Object>();
         String Message = "";
@@ -151,6 +141,10 @@ public class NewScreenController {
     }
 }
 ```
+
+> **권한 쿼리가 필요한 화면인가? — 법칙 C 로 이동**
+>
+> 조회 SQL 에 권한 필터(`WHERE ... AND $query` 또는 `INNER JOIN $query AUTH`)가 필요하다면 이 화면은 **법칙 A가 아니라 법칙 C** 이다. 위 템플릿을 그대로 쓰면 안 되고, 아래 "Step 2-C: 법칙 C" 섹션을 참조하라. 판정 기준은 `domain-knowledge` 스킬 §2 를 따른다.
 
 ### Service
 파일 위치: `src/com/hr/{module}/{subdomain}/newScreen/NewScreenService.java`
@@ -323,6 +317,135 @@ function sheet1_OnSaveEnd(Code, Msg, StCode, StMsg) {
 </body>
 </html>
 ```
+
+---
+
+## Step 2-C: 법칙 C — 전용 Controller + 권한 주입 템플릿
+
+조회 SQL 에 권한 필터가 필요한 화면. `AuthTableService`를 주입하고 `getAuthQueryMap`으로 `$query` 값을 생성한다.
+
+### Controller
+파일 위치: `src/com/hr/{module}/{subdomain}/newScreen/NewScreenController.java`
+
+```java
+@Controller
+@RequestMapping("/NewScreen.do")
+public class NewScreenController {
+
+    @Autowired
+    private NewScreenService newScreenService;
+
+    @Autowired
+    private AuthTableService authTableService;
+
+    // 뷰 매핑
+    @RequestMapping(params = "cmd=viewNewScreen")
+    public String viewNewScreen() throws Exception {
+        return "module/subdomain/newScreen/newScreen";
+    }
+
+    // 목록 조회 (권한 필터 포함)
+    @RequestMapping(params = "cmd=getNewScreenList")
+    public ModelAndView getNewScreenList(
+            HttpSession session, HttpServletRequest request,
+            @RequestParam Map<String, Object> paramMap) throws Exception {
+
+        Log.DebugStart();
+        paramMap.put("ssnEnterCd",    session.getAttribute("ssnEnterCd"));
+        paramMap.put("ssnSabun",      session.getAttribute("ssnSabun"));
+        paramMap.put("ssnSearchType", session.getAttribute("ssnSearchType"));
+        paramMap.put("ssnGrpCd",      session.getAttribute("ssnGrpCd"));
+
+        // 권한 쿼리 주입 — authSqlID 는 화면별 권한 테이블 ID (예: "THRM151", "TORG101")
+        paramMap.put("authSqlID", "THRM151");
+        Map<?, ?> query = authTableService.getAuthQueryMap(paramMap);
+        if (query != null) {
+            paramMap.put("query", query.get("query"));
+        }
+
+        List<?> list = new ArrayList<Object>();
+        String Message = "";
+        try {
+            list = newScreenService.getNewScreenList(paramMap);
+        } catch (Exception e) {
+            Message = "조회에 실패 하였습니다.";
+        }
+
+        ModelAndView mv = new ModelAndView();
+        mv.setViewName("jsonView");
+        mv.addObject("DATA", list);
+        mv.addObject("Message", Message);
+        Log.DebugEnd();
+        return mv;
+    }
+
+    // 저장
+    @RequestMapping(params = "cmd=saveNewScreen")
+    public ModelAndView saveNewScreen(
+            HttpSession session, HttpServletRequest request,
+            @RequestParam Map<String, Object> paramMap) throws Exception {
+
+        Log.DebugStart();
+        Map<String, Object> convertMap = ParamUtils.requestInParamsMultiDML(
+                request, paramMap.get("s_SAVENAME").toString(), "");
+        convertMap.put("ssnSabun",   session.getAttribute("ssnSabun"));
+        convertMap.put("ssnEnterCd", session.getAttribute("ssnEnterCd"));
+
+        String message = "";
+        int resultCnt = -1;
+        try {
+            resultCnt = newScreenService.saveNewScreen(convertMap);
+            message = resultCnt > 0 ? "저장 되었습니다." : "저장된 내용이 없습니다.";
+        } catch (Exception e) {
+            resultCnt = -1;
+            message = "저장에 실패하였습니다.";
+        }
+
+        Map<String, Object> resultMap = new HashMap<String, Object>();
+        resultMap.put("Code",    resultCnt);
+        resultMap.put("Message", message);
+        ModelAndView mv = new ModelAndView();
+        mv.setViewName("jsonView");
+        mv.addObject("Result", resultMap);
+        Log.DebugEnd();
+        return mv;
+    }
+}
+```
+
+### Mapper XML (법칙 C — Velocity `$query` 권한 필터)
+파일명: `NewScreen-mapping-query.xml`
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE queryservice PUBLIC "-//ANYFRAME//DTD QUERY SERVICE//EN"
+  "http://www.anyframejava.org/dtd/anyframe-core-query-service.dtd">
+<queryservice>
+
+    <!-- 목록 조회 (권한 필터 포함) -->
+    <query id="getNewScreenList" isDynamic="true">
+      <statement><![CDATA[
+        SELECT A.COL1
+             , A.COL2
+             , A.COL3
+          FROM TXXX A
+         WHERE A.ENTER_CD = :ssnEnterCd
+        #if($ssnSearchType && $ssnSearchType.equals("O"))
+           INNER JOIN $query AUTH
+              ON AUTH.ENTER_CD = A.ENTER_CD
+             AND AUTH.SABUN    = A.SABUN
+        #end
+        #if($searchKey && !$searchKey.equals(""))
+           AND A.COL1 LIKE '%' || TRIM(:searchKey) || '%'
+        #end
+         ORDER BY A.COL1
+      ]]></statement>
+    </query>
+
+</queryservice>
+```
+
+Service/JSP 는 법칙 A 와 동일하게 작성한다.
 
 ---
 

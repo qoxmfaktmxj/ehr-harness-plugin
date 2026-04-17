@@ -164,6 +164,57 @@ grep -rn "{URL패턴}" --include="*.jsp" WebContent/WEB-INF/jsp/
 
 ---
 
+## 추적 안전장치 (depth + cycle detection)
+
+프로시저 체인 추적 시 아래 두 가지 제한을 반드시 준수한다.
+
+### max_depth = 10
+
+- 호출 체인 깊이가 10 을 넘으면 추가 추적을 중단하고 다음을 출력한다:
+  ```
+  ⚠ 깊이 한도 도달 (depth=10): <프로시저명>
+  ·  여기서 멈춤. 추가 추적이 필요하면 사용자에게 "더 깊이 추적할까요?" 확인 후 진행.
+  ```
+- P_CPN_CAL_PAY_MAIN (108 재귀 체인) 같은 치명 프로시저는 한 번에 전체를 추적하지 않고, Layer 단위로 끊어서 사용자에게 보고한 뒤 다음 Layer 진행 여부를 묻는다.
+
+### visited_set (순환 참조 감지)
+
+- 추적 중 방문한 프로시저 이름을 `visited` 집합에 기록.
+- 다음 호출 대상이 이미 `visited` 에 있으면 아래 메시지 출력 후 해당 분기 추적 중단:
+  ```
+  ⚠ 순환 참조 감지: A → B → A (cycle detected)
+  ·  이 분기는 더 이상 따라가지 않음. 다른 분기는 정상 추적 계속.
+  ```
+- 다른 분기 추적은 계속 진행. visited 는 **현재 체인 스택** 기준으로만 체크 (다른 체인에서 같은 프로시저 호출은 순환 아님). 즉 DFS 의 recursion stack 기준.
+
+### pseudo-code
+
+```python
+def trace(proc, depth, stack):
+    if depth > 10:
+        print(f"⚠ 깊이 한도 도달 (depth={depth}): {proc}")
+        return
+    if proc in stack:
+        print(f"⚠ 순환 참조 감지: {' → '.join(stack)} → {proc}")
+        return
+    stack.append(proc)
+    for callee in find_callees(proc):
+        trace(callee, depth + 1, stack)
+    stack.pop()
+```
+
+실제 bash / Grep 기반 구현은 `stack` (DFS recursion stack) 을 공백 구분 문자열로 관리하며, **함수 복귀 직전 반드시 pop** 해야 형제 분기에서 같은 프로시저를 False Positive 로 막지 않는다:
+```bash
+# 재귀 진입 시: 현재 스택에 이미 있으면 순환
+case " $STACK " in *" $CALLEE "*) echo "⚠ 순환: $STACK → $CALLEE"; return ;; esac
+STACK="$STACK $CALLEE"
+# ... 여기서 callee 의 하위 호출 재귀 추적 ...
+# 재귀 복귀 직전: pop (이 라인 누락 시 다이아몬드 호출 A→B→D, A→C→D 에서 D 를 오탐)
+STACK="${STACK% $CALLEE}"
+```
+
+---
+
 ## 연관 프로시저 확장 탐색
 
 프로시저 하나를 분석할 때, 이름 패턴으로 관련 프로시저도 함께 찾는다.
@@ -246,7 +297,7 @@ grep -rn "F_COM_GET_SQL_MAP" --include="*-mapping-query.xml" src/com/hr/
 
 | 프로시저 | 영역 | 위험 |
 |---------|------|------|
-| P_CPN_CAL_PAY_MAIN | 급여 | 급여 계산 메인. 8+ 직접 서브, 100+ 재귀 호출 |
+| P_CPN_CAL_PAY_MAIN | 급여 | 급여 계산 메인. 8+ 직접 서브, 100+ 재귀 호출 (단 추적 시 아래 안전장치 적용 — 10 깊이 단위로 분할 보고) |
 | P_CPN_CAL_PAY_MAIN 하위 전체 | 급여 | 급여 메인이 참조하는 모든 서브 프로시저 (DB에서 USER_SOURCE 조회로 확인) |
 | P_CPN_SMPPYM_EMP | 급여 | 급여 지급 대상 처리 |
 | P_CPN_ORIGIN_TAX_INS | 급여 | 원천세 산출/등록 |

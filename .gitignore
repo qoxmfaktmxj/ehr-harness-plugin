@@ -13,3 +13,4 @@ docs/superpowers/specs/
 
 # Claude Code 세션 로그 / 상태 파일 (커밋 제외)
 .omx/
+.gstack/

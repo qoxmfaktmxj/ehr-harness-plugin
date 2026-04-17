@@ -124,6 +124,17 @@ echo "✓ Superpowers 플러그인 확인됨"
 - `legacy` — `AGENTS.md` 같은 하네스 산출물은 있는데 `.claude/HARNESS.json` 이 없음.
 - `stamped` — `.claude/HARNESS.json` 이 있고 schema_version 이 채워져 있음.
 
+> **Claude에게: audit 모드 트리거 판정 (bash 블록 실행 전 수행)**
+>
+> 사용자 메시지 원문을 검사하여 다음 키워드 중 하나라도 포함되면 `USER_TRIGGER_IS_AUDIT=1` 을 export 한 후 아래 bash 를 실행한다. 아니면 export 하지 않는다 (기본값 0 유지).
+>
+> 트리거 키워드: `점검`, `audit`, `드리프트`, `drift`, `drift 체크`, `하네스 점검`, `/harness-audit`
+>
+> 예시:
+> - "하네스 점검해줘" → `export USER_TRIGGER_IS_AUDIT=1`
+> - "하네스 업데이트" → export 안 함 (stamped 모드로 진입)
+> - "하네스 만들어줘" → export 안 함 (fresh 모드로 진입)
+
 ```bash
 # lib/harness-state.sh 가져오기
 source "$PLUGIN_ROOT/skills/ehr-harness/lib/harness-state.sh"
@@ -137,7 +148,7 @@ if [ -f "AGENTS.md" ] || ls .claude/skills/ehr-* >/dev/null 2>&1; then
 fi
 
 # USER_TRIGGER_IS_AUDIT 는 사용자 입력에서 "점검", "audit", "drift" 키워드가 감지됐을 때 설정된다.
-# (아직 SKILL.md 진입부에 판정 로직을 추가하지 않은 경우 기본값 0)
+# (위 Claude 지시로 export 되지 않은 경우 기본값 0)
 USER_TRIGGER_IS_AUDIT="${USER_TRIGGER_IS_AUDIT:-0}"
 
 if [ ! -f "$MANIFEST" ] && [ "$HAS_HARNESS_TRACE" = "0" ]; then
@@ -185,6 +196,53 @@ echo "HARNESS_MODE=$HARNESS_MODE"
 > - `analysis_snapshot` — 분석 스냅샷 (Step 3-B-pre ANALYSIS_SNAPSHOT_MD, audit drift baseline)
 >
 > `merge.sh` 는 섹션별로 다음 3 분기를 자동 적용한다: (1) 마커 쌍 존재 → 내부만 교체, (2) 헤딩만 있음 → 마커로 래핑 후 내용 교체, (3) 둘 다 없음 → 문서 끝에 새로 append.
+
+### Step 0.7-A-1: v2 매니페스트 보존 (adopt 선택 시에만)
+
+매니페스트 파일이 존재하고 `schema_version` 이 2 인 경우 (v1 은 필드가 없으므로 해당 없음), 재감별 전에 기존 값을 읽어 보존한다.
+
+```bash
+STORED_SCHEMA_VERSION=$(node -e "
+  try {
+    const m=JSON.parse(require('fs').readFileSync('$MANIFEST','utf8'));
+    process.stdout.write(String(m.schema_version||0));
+  } catch(e) { process.stdout.write('0'); }
+")
+
+if [ "$STORED_SCHEMA_VERSION" = "2" ] && [ "${LEGACY_ADOPT:-0}" = "1" ]; then
+  # v2 값을 임시 변수로 읽음
+  V2_AUTH_MODEL=$(node -e "
+    const m=JSON.parse(require('fs').readFileSync('$MANIFEST','utf8'));
+    process.stdout.write(JSON.stringify(m.auth_model||null));
+  ")
+  V2_DB_VERIFICATION=$(node -e "
+    const m=JSON.parse(require('fs').readFileSync('$MANIFEST','utf8'));
+    process.stdout.write(JSON.stringify(m.db_verification||null));
+  ")
+  V2_DDL_AUTHORING=$(node -e "
+    const m=JSON.parse(require('fs').readFileSync('$MANIFEST','utf8'));
+    process.stdout.write(JSON.stringify(m.ddl_authoring||null));
+  ")
+  HAS_V2_VALUES=1
+else
+  HAS_V2_VALUES=0
+fi
+```
+
+Step 2-M 재감별 후 (Step 2 종료 직전) diff 를 표시하고 사용자 선택을 받는다:
+
+```bash
+if [ "$HAS_V2_VALUES" = "1" ]; then
+  # diff 요약 출력 (예: auth_tables: ["THRM151_AUTH"] → [] 등)
+  echo "· v2 매니페스트 값 vs 재감별 결과 차이 감지"
+  # AskUserQuestion:
+  #   1: "기존 v2 값 유지" — V2_* 변수를 매니페스트에 기록
+  #   2: "재감별 결과 적용" — 새 감별값으로 기록 (기본)
+  #   3: "필드별 개별 선택" — auth_model/db_verification/ddl_authoring 각각 물음
+fi
+```
+
+Step 4-G (매니페스트 기록) 에서 이 선택에 따라 최종 값을 결정한다.
 
 ### Step 0.7-B: 업데이트 모드 분기
 
@@ -659,38 +717,45 @@ echo "${DB_VENDOR:-oracle}" > .claude/skills/ehr-db-query/DB_VENDOR
 고정 경로에서 Storybook 빌드 산출물을 찾는다. 광역 탐색·다중 Storybook은 지원하지 않는다.
 
 ```bash
-SB_PATH="src/main/resources/static/guide/storybook-static"
-
-if [ ! -d "$SB_PATH" ] || [ ! -f "$SB_PATH/project.json" ]; then
+# EHR4 는 Storybook/IDS 가 없으므로 design-guide 스킬을 설치하지 않는다.
+if [ "$PROFILE" = "ehr4" ]; then
   DESIGN_GUIDE=false
-  echo "디자인 가이드 미발견 → ehr-design-guide 스킬 스킵"
-  # Step 3으로 진행 (디자인 가이드 생성 없음)
+  echo "· EHR4 프로파일 — design-guide 스킬 스킵 (IDS 미지원)"
 else
-  DESIGN_GUIDE=true
-  echo "✓ 디자인 가이드 발견: $SB_PATH"
+  SB_PATH="src/main/resources/static/guide/storybook-static"
 
-  # project.json 메타 추출
-  SB_GENERATED_AT=$(node -e "
-    console.log(JSON.parse(require('fs').readFileSync('$SB_PATH/project.json','utf8')).generatedAt)
-  ")
-  SB_VERSION=$(node -e "
-    console.log(JSON.parse(require('fs').readFileSync('$SB_PATH/project.json','utf8')).storybookVersion)
-  ")
+  if [ ! -d "$SB_PATH" ] || [ ! -f "$SB_PATH/project.json" ]; then
+    DESIGN_GUIDE=false
+    echo "디자인 가이드 미발견 → ehr-design-guide 스킬 스킵"
+    # Step 3으로 진행 (디자인 가이드 생성 없음)
+  else
+    DESIGN_GUIDE=true
+    echo "✓ 디자인 가이드 발견: $SB_PATH"
 
-  # index.json 파싱 → 카테고리 트리 + title→JS 매핑
-  node -e "
-    const idx = JSON.parse(require('fs').readFileSync('$SB_PATH/index.json','utf8'));
-    const titles = {};
-    for (const [id, e] of Object.entries(idx.entries||{})) {
-      if (e.title) titles[e.title] = { id, name: e.name, importPath: e.importPath };
-    }
-    require('fs').writeFileSync('/tmp/sb_titles.json', JSON.stringify(titles, null, 2));
-  "
+    # project.json 메타 추출
+    SB_GENERATED_AT=$(node -e "
+      console.log(JSON.parse(require('fs').readFileSync('$SB_PATH/project.json','utf8')).generatedAt)
+    ")
+    SB_VERSION=$(node -e "
+      console.log(JSON.parse(require('fs').readFileSync('$SB_PATH/project.json','utf8')).storybookVersion)
+    ")
 
-  # assets/ 폴더에서 컴포넌트별 JS 파일 매핑 구성
-  # 파일명 패턴: <ComponentName>-<hash>.js
-  # 예: Button-DfetVkf1.js → Button
-  # → TITLE_TO_JS 연상배열에 저장
+    # index.json 파싱 → 카테고리 트리 + title→JS 매핑
+    SB_TITLES_TMP=$(mktemp)
+    node -e "
+      const idx = JSON.parse(require('fs').readFileSync('$SB_PATH/index.json','utf8'));
+      const titles = {};
+      for (const [id, e] of Object.entries(idx.entries||{})) {
+        if (e.title) titles[e.title] = { id, name: e.name, importPath: e.importPath };
+      }
+      require('fs').writeFileSync('$SB_TITLES_TMP', JSON.stringify(titles, null, 2));
+    "
+
+    # assets/ 폴더에서 컴포넌트별 JS 파일 매핑 구성
+    # 파일명 패턴: <ComponentName>-<hash>.js
+    # 예: Button-DfetVkf1.js → Button
+    # → TITLE_TO_JS 연상배열에 저장
+  fi
 fi
 ```
 
@@ -1189,6 +1254,30 @@ echo "$REPORT_FULL"
 | 3 (전체 재생성) | `UPDATE_STRATEGY=3` (stamped 와 동일: 모든 파일 Write) → Step 3 + 매니페스트 갱신 (새 analysis 저장) |
 | 4 (취소) | 즉시 종료 |
 
+AUDIT_STRATEGY=1 일 때의 WRITE_LIST 빌드:
+
+```bash
+# audit 반자동 모드: safe-update + new_files 는 자동 포함
+# AUDIT-6 에서 apply 로 결정된 drift 대상 output_key 도 포함
+# conflict 는 반자동 기본 keep (AUDIT-6 에서 별도 확인)
+WRITE_LIST=""
+for f in $SAFE_UPDATES $NEW_FILES; do
+  WRITE_LIST="$WRITE_LIST $f"
+done
+# HIGH_DECISIONS 의 apply 항목이 영향 주는 output_key 추가
+# (drift_importance 는 필드 단위이므로 AGENTS.md 가 대상)
+for field in "${!HIGH_DECISIONS[@]}"; do
+  if [ "${HIGH_DECISIONS[$field]}" = "apply" ]; then
+    case " $WRITE_LIST " in
+      *" AGENTS.md "*) ;;  # 이미 포함
+      *) WRITE_LIST="$WRITE_LIST AGENTS.md" ;;
+    esac
+  fi
+done
+```
+
+AUDIT_STRATEGY=3 은 stamped Step 3-PRE-6 의 UPDATE_STRATEGY=3 경로와 동일하므로 그곳에서 WRITE_LIST 가 빌드된다.
+
 ### AUDIT-6. 상급 drift 개별 확인 (AUDIT_STRATEGY=1 일 때)
 
 `IMPORTANCE.high` 의 각 항목에 대해 `AskUserQuestion`:
@@ -1257,7 +1346,7 @@ echo "$REPORT_FULL"
 >     fi
 >     [ -f "$output_key" ] && return 1 || return 0
 >   fi
->   # stamped 모드면 WRITE_LIST 검사
+>   # stamped 모드면 WRITE_LIST 검사 (audit 모드도 동일 — AUDIT-5 에서 WRITE_LIST 빌드됨)
 >   case " $WRITE_LIST " in
 >     *" $output_key "*) return 0 ;;
 >     *) return 1 ;;

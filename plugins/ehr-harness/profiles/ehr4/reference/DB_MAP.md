@@ -1,4 +1,4 @@
-# EHR5 DB 테이블맵 (기본 패키지 기준)
+# EHR4 DB 테이블맵 (기본 패키지 기준)
 
 > 1,510 테이블 요약. 상세 컬럼: db-schema/{MODULE}/tables_doc.sql
 

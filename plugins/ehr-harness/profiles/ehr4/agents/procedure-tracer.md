@@ -119,7 +119,7 @@ Grep: "F_COM_GET_SQL_MAP" --glob="*-mapping-query.xml"
 
 | 프로시저 | 위험도 | 특징 |
 |---------|--------|------|
-| P_CPN_CAL_PAY_MAIN | 치명 | 8개 직접 서브 프로시저 (총 108개 재귀), 비동기 실행, 7개 CPN 트리거 연동 |
+| P_CPN_CAL_PAY_MAIN | 치명 | 8개 직접 서브 프로시저 (총 108개 재귀, 단 추적 시 아래 안전장치 적용 — 10 깊이 단위로 분할 보고), 비동기 실행, 7개 CPN 트리거 연동 |
 | PKG_CPN_SEP | 치명 | 퇴직정산 패키지 |
 | PKG_CPN_YEA_* | 치명 | 연말정산 (연도별 ~6개 패키지, 2010~2026, 총 ~78개) |
 | PKG_CPN_PUMP_API | 치명 | 급여 펌프 API |
@@ -181,6 +181,55 @@ SELECT NAME, TEXT FROM USER_SOURCE
      FROM USER_SOURCE WHERE NAME = '최상위_프로시저명'
  )
  ORDER BY NAME, LINE;
+```
+
+## 추적 안전장치 (depth + cycle detection)
+
+프로시저 체인 추적 시 아래 두 가지 제한을 반드시 준수한다.
+
+### max_depth = 10
+
+- 호출 체인 깊이가 10 을 넘으면 추가 추적을 중단하고 다음을 출력한다:
+  ```
+  ⚠ 깊이 한도 도달 (depth=10): <프로시저명>
+  ·  여기서 멈춤. 추가 추적이 필요하면 사용자에게 "더 깊이 추적할까요?" 확인 후 진행.
+  ```
+- P_CPN_CAL_PAY_MAIN (108 재귀 체인) 같은 치명 프로시저는 한 번에 전체를 추적하지 않고, Layer 단위로 끊어서 사용자에게 보고한 뒤 다음 Layer 진행 여부를 묻는다.
+
+### visited_set (순환 참조 감지)
+
+- 추적 중 방문한 프로시저 이름을 `visited` 집합에 기록.
+- 다음 호출 대상이 이미 `visited` 에 있으면 아래 메시지 출력 후 해당 분기 추적 중단:
+  ```
+  ⚠ 순환 참조 감지: A → B → A (cycle detected)
+  ·  이 분기는 더 이상 따라가지 않음. 다른 분기는 정상 추적 계속.
+  ```
+- 다른 분기 추적은 계속 진행. visited 는 **현재 체인 스택** 기준으로만 체크 (다른 체인에서 같은 프로시저 호출은 순환 아님). 즉 DFS 의 recursion stack 기준.
+
+### pseudo-code
+
+```python
+def trace(proc, depth, stack):
+    if depth > 10:
+        print(f"⚠ 깊이 한도 도달 (depth={depth}): {proc}")
+        return
+    if proc in stack:
+        print(f"⚠ 순환 참조 감지: {' → '.join(stack)} → {proc}")
+        return
+    stack.append(proc)
+    for callee in find_callees(proc):
+        trace(callee, depth + 1, stack)
+    stack.pop()
+```
+
+실제 bash / Grep 기반 구현은 `stack` (DFS recursion stack) 을 공백 구분 문자열로 관리하며, **함수 복귀 직전 반드시 pop** 해야 형제 분기에서 같은 프로시저를 False Positive 로 막지 않는다:
+```bash
+# 재귀 진입 시: 현재 스택에 이미 있으면 순환
+case " $STACK " in *" $CALLEE "*) echo "⚠ 순환: $STACK → $CALLEE"; return ;; esac
+STACK="$STACK $CALLEE"
+# ... 여기서 callee 의 하위 호출 재귀 추적 ...
+# 재귀 복귀 직전: pop (이 라인 누락 시 다이아몬드 호출 A→B→D, A→C→D 에서 D 를 오탐)
+STACK="${STACK% $CALLEE}"
 ```
 
 ---

@@ -174,7 +174,7 @@ Anyframe Velocity 문법 사용: $rm.field, #if, #foreach, :bind, $velocityHasNe
 
 ## 핵심 코드 패턴
 
-### @Autowired 패턴 (EHR4 필수)
+### @Autowired 패턴 (EHR4 — 법칙 A, AuthTableService 미사용)
 ```java
 @Controller
 @RequestMapping(value="/NewScreen.do")
@@ -182,9 +182,6 @@ public class NewScreenController {
 
     @Autowired
     private NewScreenService newScreenService;
-
-    @Autowired
-    private AuthTableService authTableService;
 
     @RequestMapping(params="cmd=getNewScreenList")
     public ModelAndView getNewScreenList(
@@ -210,6 +207,62 @@ public class NewScreenController {
         return mv;
     }
 }
+```
+
+### Step 2-C: 법칙 C — 전용 Controller + 권한 주입 (EHR4)
+
+조회 SQL 에 `$query` 권한 필터가 필요한 화면에만 사용. `AuthTableService`를 주입하고 Velocity `$query` 변수로 SQL 에 치환한다.
+
+```java
+@Controller
+@RequestMapping(value="/NewScreen.do")
+public class NewScreenController {
+
+    @Autowired
+    private NewScreenService newScreenService;
+
+    @Autowired
+    private AuthTableService authTableService;
+
+    @RequestMapping(params="cmd=getNewScreenList")
+    public ModelAndView getNewScreenList(
+            HttpSession session, HttpServletRequest request,
+            @RequestParam Map<String, Object> paramMap) throws Exception {
+
+        paramMap.put("ssnEnterCd",    session.getAttribute("ssnEnterCd"));
+        paramMap.put("ssnSabun",      session.getAttribute("ssnSabun"));
+        paramMap.put("ssnSearchType", session.getAttribute("ssnSearchType"));
+        paramMap.put("ssnGrpCd",      session.getAttribute("ssnGrpCd"));
+
+        // 권한 쿼리 주입 — authSqlID 는 화면별 권한 테이블 ID (예: "THRM151", "TORG101")
+        paramMap.put("authSqlID", "THRM151");
+        Map<?, ?> query = authTableService.getAuthQueryMap(paramMap);
+        if (query != null) {
+            paramMap.put("query", query.get("query"));
+        }
+
+        List<?> list = new ArrayList<Object>();
+        String Message = "";
+        try {
+            list = newScreenService.getNewScreenList(paramMap);
+        } catch (Exception e) {
+            Message = "조회에 실패 하였습니다.";
+        }
+
+        ModelAndView mv = new ModelAndView();
+        mv.setViewName("jsonView");
+        mv.addObject("DATA", list);
+        mv.addObject("Message", Message);
+        return mv;
+    }
+}
+```
+
+Mapper XML 에서 Velocity `$query` 치환 패턴 (EHR4 Anyframe):
+```xml
+#if($ssnSearchType && $ssnSearchType.equals("O"))
+   INNER JOIN $query AUTH ON AUTH.ENTER_CD = A.ENTER_CD AND AUTH.SABUN = A.SABUN
+#end
 ```
 
 ### Service 패턴
