@@ -1949,6 +1949,45 @@ rm -f "$HS_VALIDATE_ERR"
 → legacy adopt 모드의 경우, Step 3 의 Write 를 모두 스킵했지만, 현재 디스크의 파일 sha 를 기준으로 outputs 를 채우므로 "현 상태 인정" 이 정확히 표현된다.
 → `UPDATE_STRATEGY=4` (취소) 일 때는 Step 4 자체가 실행되지 않으므로 매니페스트도 변하지 않는다.
 
+### 4-H. 완료 배너 (모든 모드의 최종 출력)
+
+4-G 까지 정상 수행되었다면 Step 4-F 의 긴 보고 **맨 마지막에** 아래 4줄짜리 배너를 출력한다. "누가 봐도 작업이 끝났음"을 한눈에 알 수 있도록 시각적 구분선 + 체크 이모지 + 핵심 사실 3가지(프로파일·모드·갱신 파일 수)만 압축해 찍는다.
+
+**모드별 한국어 라벨:**
+
+| `HARNESS_MODE` | 라벨 |
+|---|---|
+| `fresh` | 신규 생성 완료 |
+| `legacy` (adopt) | 기존 하네스 인정 완료 |
+| `stamped` | 업데이트 완료 |
+| `audit` | 점검 완료 |
+
+**출력 템플릿 (코드 블록으로 감싸지 말고 평문으로 출력 — 구분선이 바로 보이게):**
+
+```
+════════════════════════════════════════════════════════════
+ ✅  EHR Harness {{MODE_LABEL}} — {{PROFILE}} / {{SYSTEM_NAME}}
+     v{{PLUGIN_VERSION}} · 파일 {{N_APPLIED}}개 적용 · 모듈 {{N_MODULES}}개 · 프로시저 {{N_PROCS}}개
+════════════════════════════════════════════════════════════
+```
+
+**치환값:**
+
+- `{{MODE_LABEL}}` → 위 표에서 선택
+- `{{PROFILE}}` → `ehr4` / `ehr5`
+- `{{SYSTEM_NAME}}` → Step 2-A 에서 결정된 시스템명
+- `{{PLUGIN_VERSION}}` → `plugin.json::version`
+- `{{N_APPLIED}}` → 이번 실행에서 Write 된 파일 수
+  - `fresh` → 전체 생성 파일 수 (Step 4-A 결과)
+  - `legacy` → 0 (스탬프만 부여)
+  - `stamped` / `audit` → `N_SAFE_APPLIED + N_NEW_APPLIED + N_CONF_BACKUP + N_CONF_FORCE` (Step 4-F 카운터 합)
+- `{{N_MODULES}}` → Step 2-B 모듈 맵 개수
+- `{{N_PROCS}}` → Step 2-H 전체 프로시저 목록 개수
+
+**취소 경로 (배너 미출력):**
+
+- `UPDATE_STRATEGY=4` (stamped 취소) 또는 `AUDIT_STRATEGY=4` (audit 취소) 는 Step 4 자체가 실행되지 않으므로 배너도 찍히지 않는다. 이 경우 사용자에게는 "변경 없음" 단문만 보고한다.
+
 ---
 
 ## 참고: 수동 실행 가이드
