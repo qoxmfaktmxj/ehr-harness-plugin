@@ -134,3 +134,119 @@ CHAIN_FORWARD = [
 
 CHAIN_REVERSE = [ ...역순... ]
 ```
+
+---
+
+## Step 3: 위험 신호 스캐닝
+
+체인에 포함된 각 아이템에 대해 아래 신호를 수집한다.
+
+### 3.1 critical_proc_found 매칭
+
+```bash
+# AGENTS.md 에서 치명 프로시저 목록 읽기
+CRITICAL_PROCS=$(awk '/## 치명 프로시저/,/^## /' AGENTS.md | grep -oP 'P_[A-Z0-9_]+|PKG_[A-Z0-9_]+')
+
+# 체인 프로시저가 목록에 있는지 확인
+for proc in $CHAIN_PROCS; do
+  if echo "$CRITICAL_PROCS" | grep -qFx "$proc"; then
+    SIGNAL_CRITICAL_PROC=1
+  fi
+done
+```
+
+### 3.2 재구현 금지 컴포넌트 매칭
+
+`ehr-domain-knowledge` SKILL §6 목록 참조:
+
+```bash
+BANNED=(GetDataListController SaveDataController ExecPrcController
+        AuthTableService ApprovalMgr UploadMgr CommonCodeService
+        LayerModalUtility)
+
+for banned in "${BANNED[@]}"; do
+  if echo "$INPUT_FILE_BASENAME" | grep -qF "$banned"; then
+    SIGNAL_BANNED_COMPONENT=1
+  fi
+done
+```
+
+### 3.3 권한 경계 `${query}` 포함 매퍼
+
+```bash
+# Mapper XML 진입이거나 체인에 Mapper 포함 시
+grep -l '\${query}' {매퍼파일들} && SIGNAL_AUTH_BOUNDARY=1
+```
+
+### 3.4 Family C (신청서) 연관
+
+```bash
+# 체인에 THRI107 또는 P_HRI_AFTER_PROC_EXEC 참조
+if echo "$CHAIN_FORWARD $CHAIN_REVERSE" | grep -qE "THRI107|P_HRI_AFTER_PROC_EXEC"; then
+  SIGNAL_FAMILY_C=1
+fi
+```
+
+### 3.5 CPN 트리거 연관
+
+```bash
+# procedure-tracer §치명 프로시저 레지스트리의 7개 CPN 트리거
+CPN_TRIGGERS=(TRG_CPN_PAY_INS TRG_CPN_PAY_UPD TRG_CPN_SEP_INS
+              TRG_CPN_YEA_INS TRG_CPN_DED_INS TRG_CPN_BON_INS TRG_CPN_ADJ_INS)
+
+for trg in "${CPN_TRIGGERS[@]}"; do
+  if grep -rq "$trg" --include="*.xml" --include="*.java" .; then
+    SIGNAL_CPN_TRIGGER=1
+  fi
+done
+```
+
+### 3.6 법칙 B/C 컨트롤러·매퍼
+
+```bash
+# 법칙 B: JSP url 이 GetDataList.do / SaveData.do
+# 법칙 C: Controller 가 AuthTableService 주입
+grep -l 'GetDataList.do\|SaveData.do' --include="*.jsp" . && SIGNAL_LAW_B=1
+grep -l '@Named.*AuthTableService\|@Autowired.*AuthTableService' {컨트롤러파일들} && SIGNAL_LAW_C=1
+```
+
+### 3.7 F_COM_GET_SQL_MAP 사용
+
+```bash
+grep -rq 'F_COM_GET_SQL_MAP' --include="*-sql-query.xml" . && SIGNAL_DYNAMIC_FUNC=1
+```
+
+---
+
+## Step 4: Unresolved Refs 수집
+
+자동 추적 불가 지점을 파일:라인 형식으로 수집. 1건이라도 있으면 Step 6 에서 `· CHECK` 병기.
+
+```bash
+UNRESOLVED=()
+
+# 문자열 조합 AJAX (url: 'a' + b)
+while IFS= read -r line; do
+  UNRESOLVED+=("문자열 조합 AJAX: $line")
+done < <(grep -rn "url:\s*['\"][^'\"]*['\"]\s*+" --include="*.js" --include="*.jsp" .)
+
+# 변수 queryId (dao.excute(variableName, ...))
+while IFS= read -r line; do
+  UNRESOLVED+=("변수 queryId: $line")
+done < <(grep -rn 'dao\.excute\s*(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*,' --include="*.java" . \
+         | grep -v '"')
+
+# EXECUTE IMMEDIATE (프로시저 내부 동적 SQL — 덤프 모드 에서만 감지 가능)
+if [ "$DB_MODE" != "code-only" ]; then
+  while IFS= read -r line; do
+    UNRESOLVED+=("EXECUTE IMMEDIATE: $line")
+  done < <(grep -rn 'EXECUTE\s\+IMMEDIATE' --include="*.sql" --include="*.plb" .)
+fi
+
+# F_COM_GET_SQL_MAP 호출
+while IFS= read -r line; do
+  UNRESOLVED+=("F_COM_GET_SQL_MAP: $line")
+done < <(grep -rn 'F_COM_GET_SQL_MAP' --include="*-sql-query.xml" .)
+```
+
+→ `UNRESOLVED[]` 가 비어있지 않으면 `SIGNAL_UNRESOLVED=1`.
