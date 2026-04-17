@@ -1,0 +1,509 @@
+---
+name: ehr-impact-analyzer
+description: "EHR4 변경 전 영향도 예측 스킬. 단일 파일·프로시저명·queryId 입력으로 체인 추적, 위험 신호, 영향 화면(상한 10), 수정 권고 판정(HOLD·STOP / HOLD / Conditional-Go / Go)을 반환한다. '영향도 분석', '이거 수정하면 뭐 깨짐', '/impact', '회귀 테스트 대상', '수정 영향' 등의 키워드에 트리거."
+---
+
+# Impact Analyzer — EHR4 변경 전 영향도 예측 스킬
+
+## 역할
+
+- **변경 전** 영향 예측 (변경 후 리뷰는 release-reviewer)
+- 단일 파일·프로시저명·queryId·URL·테이블명 진입점 지원
+- 공용 파일(common.js, include JSP) 수정 차단 권고
+- 회귀 테스트 대상 화면 목록 추출 (종점 JSP 10개)
+- Unresolved refs(동적 호출) 경고 (CHECK 판정)
+
+## 기존 스킬 재사용
+
+| 단계 | 재사용 대상 | 참조 섹션 |
+|------|---|---|
+| 체인 추적 | `ehr-procedure-tracer` SKILL | §순방향 추적, §역방향 추적 |
+| 안전장치 | `ehr-procedure-tracer` SKILL | §추적 안전장치 (max_depth=10, visited_set) |
+| 동적 SQL 패턴 | `ehr-procedure-tracer` SKILL | §동적 SQL 패턴 (1/2/3) |
+| 치명 프로시저 매칭 | `AGENTS.md` | `critical_proc_found` 섹션 |
+| 재구현 금지 컴포넌트 | `ehr-domain-knowledge` SKILL | §6 재구현 금지 컴포넌트 |
+
+---
+
+## Step 0: DB 모드 판정 (선택적)
+
+프로시저/테이블 진입 시 체인 내부 로직을 더 깊이 보려면 DB 모드가 필요. 코드 grep 으로도 판정 가능한 경우가 많으므로 이 스킬은 `code-only` 기본으로 동작한다.
+
+```bash
+DB_MODE=$(cat .claude/skills/ehr-db-query/DB_MODE 2>/dev/null || echo "code-only")
+```
+
+- `direct` / `dump`: procedure-tracer 의 Step 0 참조. 프로시저 내부 SQL 확인 가능.
+- `code-only` (기본): 매퍼 XML grep 만. 내부 로직은 "확인 불가" 로 보고.
+
+---
+
+## Step 1: 입력 판별
+
+입력 문자열을 정규식 우선순위 순으로 매칭한다.
+
+| 우선순위 | 패턴 | 예시 | 유형 |
+|----|---|---|---|
+| 1 | `^(P_|PKG_)[A-Z0-9_]+$` | `P_CPN_CAL_PAY_MAIN` | 프로시저/패키지 |
+| 2 | `^T[A-Z0-9]+$` | `TCPN771` | 테이블 |
+| 3 | `^/.*\.do$` | `/SepDcPayMgr.do` | URL |
+| 4 | `.*-mapping-query\.xml$` | `SepDcPayMgr-mapping-query.xml` | Mapper XML (EHR4) |
+| 5 | `.*Controller\.java$` | `FooController.java` | Java Controller |
+| 6 | `.*Service\.java$` | `FooService.java` | Java Service |
+| 7 | `.*\.jsp$` | `vacationApp.jsp` | JSP |
+| 8 | `.*\.js$` | `common.js` | JS |
+| 9 | `^[a-z][a-zA-Z0-9]{3,}$` | `getSepDcPayList` | queryId |
+
+매칭 실패 시:
+```
+❌ 입력 유형 판별 불가: {입력}
+예시: P_CPN_CAL_PAY_MAIN / common.js / getFooList / /FooMgr.do / TCPN771
+```
+
+### 실전 가치 순위 기록
+
+| 순위 | 유형 |
+|------|------|
+| 1 | 프로시저/패키지 |
+| 2 | Mapper XML · queryId |
+| 3 | Service / Controller |
+| 4 | JSP |
+| 5 | 공용 JS · include JSP · DDL |
+
+입력이 공용 파일(순위 5)로 판별되면 **Step 5 조기 컷** + STOP 우선 처리 (Step 2 체인 추적 스킵).
+
+### 공용 파일 판별 기준
+
+- 공용 JS: 파일명 `common.js` / 경로 `WebContent/script/common/` 하위
+- 공용 include JSP: `WebContent/WEB-INF/jsp/common/` 하위 또는 파일명에 `header|footer|layout|top|bottom|nav` 포함
+
+---
+
+## Step 2: 체인 추적
+
+`ehr-procedure-tracer` SKILL 의 추적 알고리즘을 재사용한다. 유형별로 사용할 방향을 정한다.
+
+| 입력 유형 | 방향 | procedure-tracer 참조 |
+|---|---|---|
+| 프로시저/패키지 | 역방향 | §역방향 추적 Step 1~4 |
+| queryId | 역방향 | §역방향 추적 Step 2~4 |
+| Mapper XML | 양방향 | §순방향 + §역방향 |
+| Java Service/Controller | 순방향 | §순방향 추적 Step 2~4 |
+| JSP (비공용) | 순방향 | §순방향 추적 Step 1~4 |
+| URL | 순방향 | §순방향 추적 Step 1부터 |
+| 테이블 (T 접두) | 양방향 | 아래 Grep 명령 + 양방향 확장 |
+| 공용 JS / include JSP | **추적 생략** | Step 5 로 바로 이동 (STOP 우선) |
+
+### 테이블 진입 Grep
+
+```bash
+# 테이블을 직접 DML 하는 매퍼
+grep -rn "INSERT INTO {테이블}\|UPDATE {테이블}\|DELETE FROM {테이블}\|MERGE INTO {테이블}" \
+     --include="*-mapping-query.xml" src/com/hr/
+
+# 테이블을 SELECT 하는 매퍼
+grep -rn "FROM {테이블}\|JOIN {테이블}" \
+     --include="*-mapping-query.xml" src/com/hr/
+```
+
+→ 쿼리 ID 추출 → 이후 역방향 Step 2 (`dao.excute("{쿼리ID}"` grep) 진입.
+
+### 안전장치 (procedure-tracer §추적 안전장치 그대로)
+
+- `max_depth=10` — 10 초과 시 "깊이 한도 도달" 경고 + 중단
+- `visited_set` — DFS recursion stack 기준 순환 감지
+
+```bash
+# bash 구현 (procedure-tracer §pseudo-code 동일)
+case " $STACK " in *" $CALLEE "*) echo "⚠ 순환: $STACK → $CALLEE"; return ;; esac
+STACK="$STACK $CALLEE"
+# ... 재귀 ...
+STACK="${STACK% $CALLEE}"
+```
+
+체인 결과는 다음 구조로 내부 누적 (Step 5·6·7 에서 사용):
+
+```
+CHAIN_FORWARD = [
+  {layer: "jsp",  path: "vacationApp.jsp"},
+  {layer: "ctrl", path: "VacationAppController.java"},
+  {layer: "svc",  path: "VacationAppService.java"},
+  {layer: "mapper", path: "vacationApp-mapping-query.xml", queryId: "getVacationApp"},
+  {layer: "proc", name: "P_HRI_AFTER_PROC_EXEC"},
+]
+
+CHAIN_REVERSE = [ ...역순... ]
+```
+
+---
+
+## Step 3: 위험 신호 스캐닝
+
+체인에 포함된 각 아이템에 대해 아래 신호를 수집한다.
+
+### 3.1 critical_proc_found 매칭
+
+```bash
+# AGENTS.md 에서 치명 프로시저 목록 읽기
+CRITICAL_PROCS=$(awk '/## 치명 프로시저/,/^## /' AGENTS.md | grep -oP 'P_[A-Z0-9_]+|PKG_[A-Z0-9_]+')
+
+# 체인 프로시저가 목록에 있는지 확인
+for proc in $CHAIN_PROCS; do
+  if echo "$CRITICAL_PROCS" | grep -qFx "$proc"; then
+    SIGNAL_CRITICAL_PROC=1
+  fi
+done
+```
+
+### 3.2 재구현 금지 컴포넌트 매칭
+
+`ehr-domain-knowledge` SKILL §6 목록 참조:
+
+```bash
+BANNED=(GetDataListController SaveDataController ExecPrcController
+        AuthTableService ApprovalMgr UploadMgr CommonCodeService
+        LayerModalUtility)
+
+for banned in "${BANNED[@]}"; do
+  if echo "$INPUT_BASENAME" | grep -qF "$banned"; then
+    SIGNAL_BANNED_COMPONENT=1
+  fi
+done
+```
+
+### 3.3 권한 경계 `$query` 포함 매퍼
+
+```bash
+# MAPPER_FILES = Step 2 CHAIN 에서 layer=="mapper" 항목의 path 목록
+# 예: MAPPER_FILES=(src/.../vacationApp-mapping-query.xml src/.../getEmpList-mapping-query.xml)
+if [ "${#MAPPER_FILES[@]}" -gt 0 ] && grep -l '\$query' "${MAPPER_FILES[@]}" >/dev/null 2>&1; then
+  SIGNAL_AUTH_BOUNDARY=1
+fi
+```
+
+### 3.4 Family C (신청서) 연관
+
+```bash
+# 체인에 THRI107 또는 P_HRI_AFTER_PROC_EXEC 참조
+if echo "$CHAIN_FORWARD $CHAIN_REVERSE" | grep -qE "THRI107|P_HRI_AFTER_PROC_EXEC"; then
+  SIGNAL_FAMILY_C=1
+fi
+```
+
+### 3.5 CPN 트리거 연관
+
+```bash
+# procedure-tracer §치명 프로시저 레지스트리의 7개 CPN 트리거
+CPN_TRIGGERS=(TRG_CPN_PAY_INS TRG_CPN_PAY_UPD TRG_CPN_SEP_INS
+              TRG_CPN_YEA_INS TRG_CPN_DED_INS TRG_CPN_BON_INS TRG_CPN_ADJ_INS)
+
+for trg in "${CPN_TRIGGERS[@]}"; do
+  if grep -rq "$trg" --include="*.xml" --include="*.java" .; then
+    SIGNAL_CPN_TRIGGER=1
+  fi
+done
+```
+
+### 3.6 법칙 B/C 컨트롤러·매퍼
+
+```bash
+# 법칙 B: JSP url 이 GetDataList.do / SaveData.do
+# 법칙 C: Controller 가 AuthTableService 주입
+grep -rql 'GetDataList.do\|SaveData.do' --include="*.jsp" . && SIGNAL_LAW_B=1
+
+# CTRL_FILES = Step 2 CHAIN 에서 layer=="ctrl" 항목의 path 목록
+# 예: CTRL_FILES=(src/.../FooController.java)
+if [ "${#CTRL_FILES[@]}" -gt 0 ] && grep -l '@Named.*AuthTableService\|@Autowired.*AuthTableService' "${CTRL_FILES[@]}" >/dev/null 2>&1; then
+  SIGNAL_LAW_C=1
+fi
+```
+
+### 3.7 F_COM_GET_SQL_MAP 사용
+
+```bash
+grep -rq 'F_COM_GET_SQL_MAP' --include="*-mapping-query.xml" . && SIGNAL_DYNAMIC_FUNC=1
+```
+
+---
+
+## Step 4: Unresolved Refs 수집
+
+자동 추적 불가 지점을 파일:라인 형식으로 수집. 1건이라도 있으면 Step 6 에서 `· CHECK` 병기.
+
+```bash
+UNRESOLVED=()
+
+# 문자열 조합 AJAX (url: 'a' + b)
+while IFS= read -r line; do
+  UNRESOLVED+=("문자열 조합 AJAX: $line")
+done < <(grep -rnP "url:\s*['\"][^'\"]*['\"]\s*\+" --include="*.js" --include="*.jsp" .)
+
+# 변수 queryId (dao.excute(variableName, ...))
+while IFS= read -r line; do
+  UNRESOLVED+=("변수 queryId: $line")
+done < <(grep -rn 'dao\.excute\s*(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*,' --include="*.java" . \
+         | grep -v '"')
+
+# EXECUTE IMMEDIATE (프로시저 내부 동적 SQL — 덤프 모드 에서만 감지 가능)
+if [ "$DB_MODE" != "code-only" ]; then
+  while IFS= read -r line; do
+    UNRESOLVED+=("EXECUTE IMMEDIATE: $line")
+  done < <(grep -rn 'EXECUTE\s\+IMMEDIATE' --include="*.sql" --include="*.plb" .)
+fi
+
+# F_COM_GET_SQL_MAP 호출
+while IFS= read -r line; do
+  UNRESOLVED+=("F_COM_GET_SQL_MAP: $line")
+done < <(grep -rn 'F_COM_GET_SQL_MAP' --include="*-mapping-query.xml" .)
+
+# Velocity 동적 식별자 ($dyn / $rm.execute)
+while IFS= read -r line; do
+  UNRESOLVED+=("Velocity 동적 식별자: $line")
+done < <(grep -rn '\$[a-zA-Z_][a-zA-Z0-9_]*\.execute\|\$dyn' --include="*-mapping-query.xml" .)
+```
+
+→ `UNRESOLVED[]` 가 비어있지 않으면 `SIGNAL_UNRESOLVED=1`.
+
+---
+
+## Step 5: 영향 화면 수렴 (종점 JSP 만, 상한 10)
+
+체인 결과 + 역방향 추적으로 "최종 사용자 화면" 만 추출한다. Service/Controller/Mapper 는 제외.
+
+```bash
+# 순방향 체인: 입력이 JSP 면 자기 자신이 종점
+# 역방향 체인: Service/Controller/queryId/프로시저에서 시작해 JSP 까지
+
+AFFECTED_JSPS=()
+
+# 체인에서 layer=="jsp" 인 항목만 수집
+for item in $CHAIN_FORWARD $CHAIN_REVERSE; do
+  if [ "$(echo "$item" | jq -r '.layer')" = "jsp" ]; then
+    AFFECTED_JSPS+=("$(echo "$item" | jq -r '.path')")
+  fi
+done
+
+# 중복 제거 (visited_set 대신 sort -u)
+AFFECTED_JSPS=($(printf "%s\n" "${AFFECTED_JSPS[@]}" | sort -u))
+
+AFFECTED_COUNT=${#AFFECTED_JSPS[@]}
+
+# 상한 10
+if [ "$AFFECTED_COUNT" -gt 10 ]; then
+  AFFECTED_TOP10=("${AFFECTED_JSPS[@]:0:10}")
+  AFFECTED_OVERFLOW=$((AFFECTED_COUNT - 10))
+else
+  AFFECTED_TOP10=("${AFFECTED_JSPS[@]}")
+  AFFECTED_OVERFLOW=0
+fi
+```
+
+### 공용 파일 진입 시 조기 컷
+
+Step 1 에서 공용 파일 판정된 경우 체인 추적 스킵했으므로, 여기서 참조 JSP 만 수집:
+
+```bash
+if [ "$IS_COMMON_FILE" = "1" ]; then
+  if [ "$INPUT_TYPE" = "js" ]; then
+    # common.js 를 <script src=> 로 로드하는 JSP
+    AFFECTED_JSPS=($(grep -rlE "<script[^>]*src=[\"'][^\"']*${INPUT_BASENAME}" \
+                     --include="*.jsp" . | sort -u))
+  elif [ "$INPUT_TYPE" = "jsp" ]; then
+    # header.jsp 를 include 하는 JSP
+    AFFECTED_JSPS=($(grep -rlE "<%@\s*include\s+file=[\"'][^\"']*${INPUT_BASENAME}" \
+                     --include="*.jsp" . | sort -u))
+    AFFECTED_JSPS+=($(grep -rlE "<jsp:include\s+page=[\"'][^\"']*${INPUT_BASENAME}" \
+                     --include="*.jsp" .))
+    AFFECTED_JSPS+=($(grep -rlE "#parse\s*\([\"'][^\"']*${INPUT_BASENAME}" \
+                     --include="*.jsp" .))
+    AFFECTED_JSPS=($(printf "%s\n" "${AFFECTED_JSPS[@]}" | sort -u))
+  fi
+  AFFECTED_COUNT=${#AFFECTED_JSPS[@]}
+  # 상한 10 동일
+fi
+```
+
+---
+
+## Step 6: 판정 계산
+
+위험 신호 + 공용 파일 판정을 조합해 판정 라벨을 결정한다. 승격 규칙: `HOLD·STOP > HOLD > Conditional-Go > Go`. CHECK 는 병기.
+
+### 6.1 판정 분기
+
+```bash
+VERDICT="Go"
+VERDICT_REASON=()
+
+# HOLD·STOP 조건
+if [ "$IS_COMMON_FILE" = "1" ]; then
+  if [ "$INPUT_TYPE" = "js" ] && [ "$AFFECTED_COUNT" -ge 20 ]; then
+    VERDICT="HOLD·STOP"
+    VERDICT_REASON+=("공용 유틸 JS (참조 JSP ≥ 20: $AFFECTED_COUNT)")
+  elif [ "$INPUT_TYPE" = "jsp" ] && [ "$AFFECTED_COUNT" -ge 10 ]; then
+    VERDICT="HOLD·STOP"
+    VERDICT_REASON+=("공용 include JSP (include 되는 JSP ≥ 10: $AFFECTED_COUNT)")
+  fi
+fi
+
+if [ "$SIGNAL_BANNED_COMPONENT" = "1" ]; then
+  VERDICT="HOLD·STOP"
+  VERDICT_REASON+=("재구현 금지 컴포넌트 매칭")
+fi
+
+# HOLD 조건 (STOP 아닐 때만)
+if [ "$VERDICT" != "HOLD·STOP" ]; then
+  if [ "$SIGNAL_CRITICAL_PROC" = "1" ]; then
+    VERDICT="HOLD"
+    VERDICT_REASON+=("치명 프로시저 체인 접촉 (critical_proc_found)")
+  elif [ "$SIGNAL_CPN_TRIGGER" = "1" ]; then
+    VERDICT="HOLD"
+    VERDICT_REASON+=("CPN 트리거 연관")
+  elif [ "$SIGNAL_AUTH_BOUNDARY" = "1" ] && [ "$INPUT_TYPE" = "xml" ]; then
+    VERDICT="HOLD"
+    VERDICT_REASON+=("권한 경계 \$query 쿼리 직접 수정")
+  fi
+fi
+
+# Conditional-Go 조건
+if [ "$VERDICT" = "Go" ]; then
+  if [ "$SIGNAL_LAW_B" = "1" ] || [ "$SIGNAL_LAW_C" = "1" ]; then
+    VERDICT="Conditional-Go"
+    VERDICT_REASON+=("법칙 B/C 컨트롤러·매퍼")
+  elif [ "$SIGNAL_FAMILY_C" = "1" ]; then
+    VERDICT="Conditional-Go"
+    VERDICT_REASON+=("Family C (신청서, THRI107/P_HRI_AFTER_PROC_EXEC 연계)")
+  elif [ "$SIGNAL_DYNAMIC_FUNC" = "1" ]; then
+    VERDICT="Conditional-Go"
+    VERDICT_REASON+=("F_COM_GET_SQL_MAP 사용처")
+  fi
+fi
+
+# CHECK 병기
+if [ "$SIGNAL_UNRESOLVED" = "1" ]; then
+  VERDICT="${VERDICT} · CHECK"
+fi
+```
+
+### 6.2 판정 기호
+
+| 판정 | 기호 | 해석 |
+|------|------|------|
+| HOLD·STOP | 🛑 | 수정 권장 안 함 + 대안 제시 |
+| HOLD | ⚠ | 운영 반영 차단, 사용자 확인 필요 |
+| Conditional-Go | ⚙ | 테스트 화면 반드시 회귀 |
+| Go | ✅ | 안전 |
+| CHECK (병기) | 🔍 | 수동 확인 필요 |
+
+---
+
+## Step 7: 리포트 조립
+
+### 7.1 표준 템플릿 (비공용 파일)
+
+````markdown
+## {입력} 영향도 분석
+
+### 1. 입력 분류
+- 타입: {프로시저|JSP|Controller|Service|Mapper|JS|queryId|URL|테이블}
+- 판별 근거: {정규식 매칭 근거}
+- 실전 가치 순위: {1~5}
+
+### 2. 체인 추적 결과
+{순방향 또는 역방향 체인을 트리 형태로}
+
+예:
+```
+P_CPN_CAL_PAY_MAIN
+ ├─ P_CPN_CAL_PAY_TAX (depth 2)
+ ├─ P_CPN_CAL_PAY_INS (depth 2)
+ └─ ... (8 직접 / 108 재귀, max_depth=10 한도 도달)
+```
+
+### 3. 연관 자원
+- queryId: {목록 또는 "없음"}
+- 프로시저: {목록}
+- 트리거: {목록 (critical_proc_found 매칭 시 ⚠ 표시)}
+
+### 4. 영향 화면 (상한 10)
+1. {jsp 경로}
+2. ...
+{"+ N개 더 있음 (분석 무의미)" 표기 if overflow > 0}
+
+### 5. Unresolved Refs (CHECK 대상)
+{있으면 목록, 없으면 "없음"}
+- 변수 queryId: {파일:라인}
+- 문자열 조합 AJAX: {파일:라인}
+
+### 6. 판정
+{기호} **{판정 라벨}**
+
+**근거**:
+- {조건 1}
+- {조건 2}
+
+**다음 행동**:
+- {회귀 테스트 권고}
+- {추가 확인 사항}
+````
+
+### 7.2 공용 파일 STOP 템플릿
+
+````markdown
+## {입력} 영향도 분석
+
+### 1. 입력 분류
+- 타입: {JS | JSP (공용)}
+- 판별 근거: 공용 경로/파일명 매칭
+- 실전 가치 순위: 5
+
+### 4. 영향 화면 (예시 10 + STOP 권고)
+1. {jsp 경로}
+...
+
+⚠ 이 파일의 실제 전파 범위는 {AFFECTED_COUNT}개 JSP. 분석 무의미.
+
+### 6. 판정
+🛑 **HOLD · STOP** — 이 파일은 수정을 권장하지 않습니다.
+
+**근거**:
+- {참조 수}
+- 영향 화면 수 {AFFECTED_COUNT}개 — 회귀 테스트 범위 초과
+
+**다음 행동**:
+- 대안 1: 신규 유틸 함수를 별도 파일로 추가 후 필요 화면만 참조
+- 대안 2: 기존 함수의 호출자만 선택적으로 수정 (전파 없음)
+- 그래도 수정해야 한다면: 사용자 직접 승인 필요
+````
+
+### 7.3 회귀 테스트 권고 (Step 6 판정별)
+
+| 판정 | 권고 문구 |
+|------|------|
+| HOLD·STOP | "수정 대신 대안 검토. 사용자 승인 없이 진행 금지." |
+| HOLD | "운영 반영 전 사용자 확인 + release-reviewer 통과 필수." |
+| Conditional-Go | "위 {N}개 화면 반드시 회귀 테스트. release-reviewer 통과 권장." |
+| Go | "영향 범위 제한적. 해당 화면만 스모크 테스트." |
+| (· CHECK 병기) | "Unresolved refs {M}건 — 위 파일:라인 수동 검토." |
+
+---
+
+## 출력 품질 체크
+
+리포트 조립 전 아래 자기 확인:
+
+- [ ] 6 섹션 모두 포함 (비어있어도 "없음" 표기)
+- [ ] 판정 기호 정확 (🛑/⚠/⚙/✅ + 🔍 병기)
+- [ ] 영향 화면 정확히 10개 이하 (overflow 시 "+ N개 더 있음")
+- [ ] 판정 근거에 SIGNAL_* 중 트리거된 것 전부 반영
+- [ ] 공용 파일이면 §4·§6 강조 템플릿 사용
+
+---
+
+## 관련 스킬
+
+- 변경 **후** 리뷰: `release-reviewer` 에이전트
+- 실제 화면 수정: `screen-builder` 에이전트
+- DB 직접 조회: `ehr-db-query` 스킬
+- 도메인 법칙·Family: `ehr-domain-knowledge` 스킬
+- 체인 추적 상세: `ehr-procedure-tracer` 스킬
