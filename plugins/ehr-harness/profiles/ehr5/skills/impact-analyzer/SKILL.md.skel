@@ -216,14 +216,21 @@ fi
 
 ```bash
 # procedure-tracer §치명 프로시저 레지스트리의 7개 CPN 트리거
+# 체인 내 매퍼/컨트롤러/서비스 파일만 스코프 (repo 전체 grep 금지)
 CPN_TRIGGERS=(TRG_CPN_PAY_INS TRG_CPN_PAY_UPD TRG_CPN_SEP_INS
               TRG_CPN_YEA_INS TRG_CPN_DED_INS TRG_CPN_BON_INS TRG_CPN_ADJ_INS)
 
-for trg in "${CPN_TRIGGERS[@]}"; do
-  if grep -rq "$trg" --include="*.xml" --include="*.java" .; then
-    SIGNAL_CPN_TRIGGER=1
-  fi
-done
+# CHAIN_FILES = 체인 내 모든 파일 경로 (mapper + ctrl + svc)
+CHAIN_FILES=("${MAPPER_FILES[@]}" "${CTRL_FILES[@]}" "${SVC_FILES[@]}")
+
+if [ "${#CHAIN_FILES[@]}" -gt 0 ]; then
+  for trg in "${CPN_TRIGGERS[@]}"; do
+    if grep -lq "$trg" "${CHAIN_FILES[@]}" 2>/dev/null; then
+      SIGNAL_CPN_TRIGGER=1
+      break
+    fi
+  done
+fi
 ```
 
 ### 3.6 법칙 B/C 컨트롤러·매퍼
@@ -231,7 +238,11 @@ done
 ```bash
 # 법칙 B: JSP url 이 GetDataList.do / SaveData.do
 # 법칙 C: Controller 가 AuthTableService 주입
-grep -rql 'GetDataList.do\|SaveData.do' --include="*.jsp" . && SIGNAL_LAW_B=1
+# 체인에 포함된 JSP 파일만 스캔 (repo 전체 grep 금지)
+# JSP_FILES = 체인의 layer=="jsp" 항목 path
+if [ "${#JSP_FILES[@]}" -gt 0 ] && grep -lq 'GetDataList.do\|SaveData.do' "${JSP_FILES[@]}" 2>/dev/null; then
+  SIGNAL_LAW_B=1
+fi
 
 # CTRL_FILES = Step 2 CHAIN 에서 layer=="ctrl" 항목의 path 목록
 # 예: CTRL_FILES=(src/.../FooController.java)
@@ -243,7 +254,10 @@ fi
 ### 3.7 F_COM_GET_SQL_MAP 사용
 
 ```bash
-grep -rq 'F_COM_GET_SQL_MAP' --include="*-sql-query.xml" . && SIGNAL_DYNAMIC_FUNC=1
+# 체인에 포함된 매퍼만 스캔
+if [ "${#MAPPER_FILES[@]}" -gt 0 ] && grep -lq 'F_COM_GET_SQL_MAP' "${MAPPER_FILES[@]}" 2>/dev/null; then
+  SIGNAL_DYNAMIC_FUNC=1
+fi
 ```
 
 ---
