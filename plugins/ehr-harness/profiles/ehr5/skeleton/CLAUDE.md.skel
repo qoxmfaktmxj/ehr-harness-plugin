@@ -28,6 +28,7 @@ Spring Boot 2.7.18 + MyBatis 3 + Java 8 + JSP + jQuery + IBSheet7 + Oracle.
 |------------|------------------|
 | "화면 만들어", "신규 개발", "CRUD 추가" | `ehr-screen-builder` **에이전트** 스폰 |
 | "프로시저 분석해", "급여 로직", "체인 추적", "동적 SQL" | `ehr-procedure-tracer` **에이전트** 스폰 |
+| "영향도 분석", "이거 수정하면 뭐 깨짐", "/impact {X}" | `impact-analyzer` **에이전트** 스폰 |
 | "어디에 있어?", "찾아줘", "에러 원인", "메뉴 찾기" | `ehr-codebase-navigator` **스킬** 직접 사용 |
 | "DB 조회", "프로시저 소스", "테이블 구조", "컬럼 확인" | `ehr-db-query` **스킬** 직접 사용 |
 | "권한", "법칙", "패턴", "Family", "APPL_STATUS", "배치" | `ehr-domain-knowledge` **스킬** 직접 사용 |
