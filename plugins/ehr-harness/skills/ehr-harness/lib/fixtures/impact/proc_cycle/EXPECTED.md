@@ -1,5 +1,10 @@
 # proc_cycle
 
+## 전제 조건
+
+**DB_MODE ∈ {direct, dump}** — 이 fixture 는 procedure body 를 enumerate 할 수 있는 DB 모드에서만 유효.
+code-only 모드(기본값)에서는 procedure-tracer 가 XML 매퍼만 grep 하므로 P_A_CYCLE → P_B_CYCLE 체인 자체를 발견할 수 없어 cycle 경고 생성 불가. code-only 검증에서는 이 fixture 를 **skip**.
+
 ## 입력
 `/impact P_A_CYCLE`
 
