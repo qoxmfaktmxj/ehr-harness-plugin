@@ -174,8 +174,11 @@ done
 ### 3.3 권한 경계 `${query}` 포함 매퍼
 
 ```bash
-# Mapper XML 진입이거나 체인에 Mapper 포함 시
-grep -l '\${query}' {매퍼파일들} && SIGNAL_AUTH_BOUNDARY=1
+# MAPPER_FILES = Step 2 CHAIN 에서 layer=="mapper" 항목의 path 목록
+# 예: MAPPER_FILES=(src/.../vacationApp-sql-query.xml src/.../getEmpList-sql-query.xml)
+if [ "${#MAPPER_FILES[@]}" -gt 0 ] && grep -l '\${query}' "${MAPPER_FILES[@]}" >/dev/null 2>&1; then
+  SIGNAL_AUTH_BOUNDARY=1
+fi
 ```
 
 ### 3.4 Family C (신청서) 연관
@@ -206,8 +209,13 @@ done
 ```bash
 # 법칙 B: JSP url 이 GetDataList.do / SaveData.do
 # 법칙 C: Controller 가 AuthTableService 주입
-grep -l 'GetDataList.do\|SaveData.do' --include="*.jsp" . && SIGNAL_LAW_B=1
-grep -l '@Named.*AuthTableService\|@Autowired.*AuthTableService' {컨트롤러파일들} && SIGNAL_LAW_C=1
+grep -rql 'GetDataList.do\|SaveData.do' --include="*.jsp" . && SIGNAL_LAW_B=1
+
+# CTRL_FILES = Step 2 CHAIN 에서 layer=="ctrl" 항목의 path 목록
+# 예: CTRL_FILES=(src/.../FooController.java)
+if [ "${#CTRL_FILES[@]}" -gt 0 ] && grep -l '@Named.*AuthTableService\|@Autowired.*AuthTableService' "${CTRL_FILES[@]}" >/dev/null 2>&1; then
+  SIGNAL_LAW_C=1
+fi
 ```
 
 ### 3.7 F_COM_GET_SQL_MAP 사용
@@ -228,7 +236,7 @@ UNRESOLVED=()
 # 문자열 조합 AJAX (url: 'a' + b)
 while IFS= read -r line; do
   UNRESOLVED+=("문자열 조합 AJAX: $line")
-done < <(grep -rn "url:\s*['\"][^'\"]*['\"]\s*+" --include="*.js" --include="*.jsp" .)
+done < <(grep -rnP "url:\s*['\"][^'\"]*['\"]\s*\+" --include="*.js" --include="*.jsp" .)
 
 # 변수 queryId (dao.excute(variableName, ...))
 while IFS= read -r line; do
