@@ -275,12 +275,19 @@ while IFS= read -r line; do
 done < <(grep -rnP "url:\s*['\"][^'\"]*['\"]\s*\+" --include="*.js" --include="*.jsp" .)
 
 # 변수 queryId (dao.excute(variableName, ...))
+# 정규식이 첫 인자를 bare identifier 로 이미 제약하므로 리터럴 queryId 는 매치 안 됨.
+# 추가 `| grep -v '"'` 는 중복 + 유해 (두 번째 인자에 따옴표 있는 Anyframe 표준 패턴 오탐 제거)
 while IFS= read -r line; do
   UNRESOLVED+=("변수 queryId: $line")
-done < <(grep -rn 'dao\.excute\s*(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*,' --include="*.java" . \
-         | grep -v '"')
+done < <(grep -rn 'dao\.excute\s*(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*,' --include="*.java" .)
 
-# EXECUTE IMMEDIATE (프로시저 내부 동적 SQL — 덤프 모드 에서만 감지 가능)
+# EXECUTE IMMEDIATE 감지 — 두 가지 소스
+# (1) 매퍼 XML 주석/CDATA (항상 감지 가능)
+while IFS= read -r line; do
+  UNRESOLVED+=("EXECUTE IMMEDIATE: $line")
+done < <(grep -rn 'EXECUTE\s\+IMMEDIATE' --include="*-mapping-query.xml" .)
+
+# (2) 프로시저 본체 SQL 덤프 (dump/direct 모드 전용)
 if [ "$DB_MODE" != "code-only" ]; then
   while IFS= read -r line; do
     UNRESOLVED+=("EXECUTE IMMEDIATE: $line")
