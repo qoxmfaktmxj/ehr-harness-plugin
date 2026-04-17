@@ -76,3 +76,61 @@ DB_MODE=$(cat .claude/skills/ehr-db-query/DB_MODE 2>/dev/null || echo "code-only
 
 - 공용 JS: 파일명 `common.js` / 경로 `src/main/webapp/resources/js/common/` 하위
 - 공용 include JSP: `src/main/webapp/WEB-INF/jsp/common/` 하위 또는 파일명에 `header|footer|layout|top|bottom|nav` 포함
+
+---
+
+## Step 2: 체인 추적
+
+`ehr-procedure-tracer` SKILL 의 추적 알고리즘을 재사용한다. 유형별로 사용할 방향을 정한다.
+
+| 입력 유형 | 방향 | procedure-tracer 참조 |
+|---|---|---|
+| 프로시저/패키지 | 역방향 | §역방향 추적 Step 1~4 |
+| queryId | 역방향 | §역방향 추적 Step 2~4 |
+| Mapper XML | 양방향 | §순방향 + §역방향 |
+| Java Service/Controller | 순방향 | §순방향 추적 Step 2~4 |
+| JSP (비공용) | 순방향 | §순방향 추적 Step 1~4 |
+| URL | 순방향 | §순방향 추적 Step 1부터 |
+| 테이블 (T 접두) | 양방향 | 아래 Grep 명령 + 양방향 확장 |
+| 공용 JS / include JSP | **추적 생략** | Step 5 로 바로 이동 (STOP 우선) |
+
+### 테이블 진입 Grep
+
+```bash
+# 테이블을 직접 DML 하는 매퍼
+grep -rn "INSERT INTO {테이블}\|UPDATE {테이블}\|DELETE FROM {테이블}\|MERGE INTO {테이블}" \
+     --include="*-sql-query.xml" src/main/resources/mapper/
+
+# 테이블을 SELECT 하는 매퍼
+grep -rn "FROM {테이블}\|JOIN {테이블}" \
+     --include="*-sql-query.xml" src/main/resources/mapper/
+```
+
+→ 쿼리 ID 추출 → 이후 역방향 Step 2 (`dao.excute("{쿼리ID}"` grep) 진입.
+
+### 안전장치 (procedure-tracer §추적 안전장치 그대로)
+
+- `max_depth=10` — 10 초과 시 "깊이 한도 도달" 경고 + 중단
+- `visited_set` — DFS recursion stack 기준 순환 감지
+
+```bash
+# bash 구현 (procedure-tracer §pseudo-code 동일)
+case " $STACK " in *" $CALLEE "*) echo "⚠ 순환: $STACK → $CALLEE"; return ;; esac
+STACK="$STACK $CALLEE"
+# ... 재귀 ...
+STACK="${STACK% $CALLEE}"
+```
+
+체인 결과는 다음 구조로 내부 누적 (Step 5·6·7 에서 사용):
+
+```
+CHAIN_FORWARD = [
+  {layer: "jsp",  path: "vacationApp.jsp"},
+  {layer: "ctrl", path: "VacationAppController.java"},
+  {layer: "svc",  path: "VacationAppService.java"},
+  {layer: "mapper", path: "vacationApp-sql-query.xml", queryId: "getVacationApp"},
+  {layer: "proc", name: "P_HRI_AFTER_PROC_EXEC"},
+]
+
+CHAIN_REVERSE = [ ...역순... ]
+```
