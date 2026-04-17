@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapper namespace="cpn.sepDcPayMgr">
+  <select id="getSepList" resultType="cMap">
+    SELECT * FROM TCPN700 A INNER JOIN ${query} AUTH ON A.SABUN = AUTH.SABUN
+  </select>
+</mapper>

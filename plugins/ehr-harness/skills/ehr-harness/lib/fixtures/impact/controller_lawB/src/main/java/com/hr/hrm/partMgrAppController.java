@@ -1,0 +1,1 @@
+// partMgrAppController — calls GetDataListController internally

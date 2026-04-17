@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapper namespace="tim.timeCdMgr">
+  <select id="getList" resultType="cMap">SELECT * FROM TTIM001 WHERE ENTER_CD = #{ssnEnterCd}</select>
+</mapper>

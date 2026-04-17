@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapper namespace="hri.vacationApp">
+  <select id="getAppList" resultType="cMap">
+    SELECT * FROM THRI107 A INNER JOIN ${query} AUTH ON A.SABUN = AUTH.SABUN
+  </select>
+  <update id="execAfter" statementType="CALLABLE">
+    { CALL P_HRI_AFTER_PROC_EXEC(#{applCd}) }
+  </update>
+</mapper>

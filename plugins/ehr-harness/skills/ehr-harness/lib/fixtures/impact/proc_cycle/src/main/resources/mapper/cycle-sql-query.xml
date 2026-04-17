@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapper namespace="cycle">
+  <update id="call_a_cycle" statementType="CALLABLE">{ CALL P_A_CYCLE() }</update>
+  <!-- P_A_CYCLE → P_B_CYCLE → P_A_CYCLE 순환은 procedure-tracer 시뮬레이션으로 감지 -->
+</mapper>

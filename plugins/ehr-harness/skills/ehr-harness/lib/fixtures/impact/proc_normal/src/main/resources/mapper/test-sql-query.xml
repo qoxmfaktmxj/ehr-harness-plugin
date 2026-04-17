@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapper namespace="test">
+  <update id="execSample" statementType="CALLABLE">
+    { CALL P_TEST_SAMPLE(#{enterCd}) }
+  </update>
+</mapper>

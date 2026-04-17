@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapper namespace="chain">
+  <update id="call_main" statementType="CALLABLE">{ CALL P_CPN_CAL_PAY_MAIN() }</update>
+  <update id="call_a" statementType="CALLABLE">{ CALL P_A() }</update>
+  <!-- 실제 P_CPN_CAL_PAY_MAIN 내부에서 P_A → P_B → ... → P_L 호출은 Oracle 에만 존재하므로 fixture 는 구조만 -->
+</mapper>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapper namespace="cpn.sepMaster">
+  <update id="updateMaster">UPDATE TCPN771 SET CLOSE_YN = 'Y' WHERE ENTER_CD = #{ssnEnterCd}</update>
+  <update id="execSepPay" statementType="CALLABLE">{ CALL P_CPN_SEP_PAY_MAIN() }</update>
+</mapper>

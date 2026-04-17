@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapper namespace="hrm.partMgrApp">
+  <select id="getPartMgrList" resultType="cMap">SELECT * FROM THRM300</select>
+</mapper>

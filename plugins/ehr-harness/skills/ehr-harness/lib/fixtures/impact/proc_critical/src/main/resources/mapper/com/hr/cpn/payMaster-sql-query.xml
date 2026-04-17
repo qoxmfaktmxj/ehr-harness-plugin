@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapper namespace="cpn.payMaster">
+  <update id="execPayMain" statementType="CALLABLE">
+    { CALL P_CPN_CAL_PAY_MAIN(#{enterCd}, #{yearMonth}, #{sqlCode, mode=OUT}) }
+  </update>
+</mapper>
