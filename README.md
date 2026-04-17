@@ -578,7 +578,7 @@ find . -name "ojdbc*.jar" -o -name "tibero*.jar" 2>/dev/null
 
 ```
 1. 생성 파일 수 확인
-   EHR4/EHR5: 21개 파일 (6 스킬 × 2 복사본 + 3 에이전트 + 6 문서/설정 + 1 .agents/skills/)
+   EHR4/EHR5: 21개 파일 (6 스킬 × 2 복사본 + 3 에이전트 + 6 문서/설정)
 
 2. AGENTS.md 교차 확인
    모듈 맵의 모듈 목록 vs 실제 디렉토리 목록 비교
