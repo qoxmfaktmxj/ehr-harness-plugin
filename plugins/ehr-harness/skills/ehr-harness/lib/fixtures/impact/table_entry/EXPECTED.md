@@ -10,4 +10,4 @@
 
 ### 6. 판정
 `⚠ HOLD`
-근거: 체인에 치명 프로시저 PKG_CPN_SEP 매칭
+근거: 체인에 치명 프로시저 P_CPN_SEP_PAY_MAIN 매칭
