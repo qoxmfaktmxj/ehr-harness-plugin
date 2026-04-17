@@ -165,7 +165,7 @@ BANNED=(GetDataListController SaveDataController ExecPrcController
         LayerModalUtility)
 
 for banned in "${BANNED[@]}"; do
-  if echo "$INPUT_FILE_BASENAME" | grep -qF "$banned"; then
+  if echo "$INPUT_BASENAME" | grep -qF "$banned"; then
     SIGNAL_BANNED_COMPONENT=1
   fi
 done
