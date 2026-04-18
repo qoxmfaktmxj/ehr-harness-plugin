@@ -945,3 +945,57 @@ ehr-harness-plugin/
 - audit 결과 history 추적
 - 자동 스케줄링 (주 1회 등)
 - HTML 리포트 옵션
+
+---
+
+## 12. EHR Cycle (v1.9.0 신규)
+
+CE(Compound Engineering) 철학을 EHR 하네스에 맞게 재구성한 **쓸수록 축적되는 5단계 사이클**. 생성된 각 고객사 프로젝트에 자동 탑재된다.
+
+### 폐곡선 개념
+
+```
+자연어 질의 → 라우팅 판정 → 필요 단계만 제안
+  /ehr:ideate    축적 데이터에서 개선 후보
+  /ehr:plan      superpowers:writing-plans + 영향도 분석
+  /ehr:work      superpowers:executing-plans + 스킬 라우팅
+  /ehr:review    receiving-code-review + release-reviewer + db-impact-reviewer
+  /ehr:compound  L2(reference·domain-knowledge) / L3(프롬프트) / 선호 회수
+                                       │
+                                       ▼
+                 다음 사이클 진입 시 축적된 지식으로 시작
+```
+
+### 커맨드 5종 (타깃 프로젝트에 자동 생성)
+
+| 커맨드 | 역할 | 배선 |
+|---|---|---|
+| `/ehr:ideate` | 하네스 축적 데이터에서 고임팩트 개선 후보 제안 | `reference/*`, `domain-knowledge`, `HARNESS.json.analysis` |
+| `/ehr:plan` | 기술 계획 작성 + EHR 영향도·DB 영향 섹션 | `superpowers:writing-plans` + `impact-analyzer` + `db-impact-reviewer` |
+| `/ehr:work` | 플랜 실행 + EHR 스킬 자동 라우팅 | `superpowers:executing-plans` + `design-guide`/`screen-builder`/`db-query` |
+| `/ehr:review` | 다중 관점 릴리스 리뷰 | `superpowers:receiving-code-review` ∥ `release-reviewer` ∥ `db-impact-reviewer` |
+| `/ehr:compound` | 지식 회수 — 폐곡선의 닫힘점 | L2·L3·Preferences 블록 갱신 + `HARNESS.json` 이력 |
+
+> 브레인스토밍 단계는 `superpowers:brainstorming` 이 담당 (전제: superpowers 설치 필수).
+
+### 4대 불변식 (재생성으로 절대 유실되지 않음)
+
+1. L2 지식 블록 (`EHR-COMPOUND`) — `reference/*`, `domain-knowledge/SKILL.md`
+2. L3 승급 블록 (`EHR-PROMOTED`) — `agents/*.md`, `skills/**/SKILL.md`
+3. 협업 선호 블록 (`EHR-PREFERENCES`) — `CLAUDE.md`
+4. 사용자 작업물 — `.ehr-bak/`, `docs/ehr/*`
+
+### 새 자산 (플러그인 측)
+
+| 자산 | 위치 |
+|---|---|
+| 커맨드 스켈레톤 5종 | `profiles/shared/commands/ehr/*.md.skel` |
+| `db-impact-reviewer` 에이전트 | `profiles/ehr4\|ehr5/agents/db-impact-reviewer.md` |
+| 마커 머지 헬퍼 | `skills/ehr-harness/lib/ehr-compound.sh` |
+| audit 드리프트 4종 | `skills/ehr-harness/lib/audit.sh` (`ehr_audit_*` 함수군) |
+| HARNESS.json v4 | `ehr_cycle` 섹션 신설 (`compounds[]`·`promoted[]`·`preferences_history[]`) |
+| CLAUDE.md 블록 | `EHR-ROUTING` (규칙 고정) + `EHR-PREFERENCES` (선호 누적) |
+
+### 기존 하네스(v3) 마이그레이션
+
+각 업체 프로젝트에서 `/ehr-harness 재생성해줘` 한 번 실행하면 자동으로 v3 → v4 로 승격되며 신규 자산 7개가 심어진다. 업체 간 지식은 **프로젝트-로컬 격리**로 절대 섞이지 않는다.
