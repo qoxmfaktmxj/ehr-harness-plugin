@@ -175,13 +175,70 @@ CLAUDE_EOF
 
 RESULT=$(ehr_audit_compound_drift "$TMP_P")
 echo "$RESULT" | grep -q "orphan_compound:ghost-id" \
-  && pass "ehr_audit_compound_drift: orphan_compound 감지" \
-  || fail "ehr_audit_compound_drift: ghost-id 미검출 ($RESULT)"
+  && pass "ehr_audit_compound_drift: compact JSON orphan 감지" \
+  || fail "ehr_audit_compound_drift: compact JSON 미검출 ($RESULT)"
+
+# Pretty-printed JSON (node JSON.stringify(m, null, 2) 출력) 에서도 동일 동작 검증
+cat > "$TMP_P/.claude/HARNESS.json" <<'PRETTY_JSON_EOF'
+{
+  "schema_version": 4,
+  "ehr_cycle": {
+    "compounds": [
+      {
+        "id": "ghost-id",
+        "level": "L2",
+        "domain": "code_map",
+        "files": [
+          "reference/CODE_MAP.md"
+        ]
+      }
+    ],
+    "promoted": [
+      {
+        "id": "abc",
+        "backup": ".ehr-bak/does-not-exist.bak"
+      }
+    ]
+  }
+}
+PRETTY_JSON_EOF
+RESULT=$(ehr_audit_compound_drift "$TMP_P")
+echo "$RESULT" | grep -q "orphan_compound:ghost-id" \
+  && pass "ehr_audit_compound_drift: pretty JSON orphan 감지" \
+  || fail "ehr_audit_compound_drift: pretty JSON 미검출 ($RESULT)"
 
 RESULT=$(ehr_audit_stale_promotion "$TMP_P")
 echo "$RESULT" | grep -q "stale_promotion::.ehr-bak/does-not-exist.bak" \
-  && pass "ehr_audit_stale_promotion: 미존재 백업 감지" \
+  && pass "ehr_audit_stale_promotion: pretty JSON 미존재 백업 감지" \
   || fail "ehr_audit_stale_promotion: 감지 실패 ($RESULT)"
+
+# backup_cleaned=true 인 엔트리는 stale 으로 리포트하지 않아야 함
+cat > "$TMP_P/.claude/HARNESS.json" <<'CLEANED_EOF'
+{
+  "schema_version": 4,
+  "ehr_cycle": {
+    "compounds": [],
+    "promoted": [
+      { "id": "x", "backup": ".ehr-bak/cleaned.bak", "backup_cleaned": true }
+    ]
+  }
+}
+CLEANED_EOF
+RESULT=$(ehr_audit_stale_promotion "$TMP_P")
+[[ -z "$RESULT" ]] \
+  && pass "ehr_audit_stale_promotion: backup_cleaned 엔트리는 리포트 제외" \
+  || fail "ehr_audit_stale_promotion: backup_cleaned 무시 실패 ($RESULT)"
+
+# 원복 (뒤에 오는 preferences 테스트용)
+cat > "$TMP_P/.claude/HARNESS.json" <<'EHR_JSON_EOF'
+{
+  "schema_version": 4,
+  "ehr_cycle": {
+    "compounds": [{"id":"ghost-id","level":"L2","domain":"code_map","files":["reference/CODE_MAP.md"]}],
+    "promoted": [{"id":"abc","backup":".ehr-bak/does-not-exist.bak"}]
+  }
+}
+EHR_JSON_EOF
 
 # 정상 preferences: 경고 없어야 함
 RESULT=$(ehr_audit_preferences_parse "$TMP_P")

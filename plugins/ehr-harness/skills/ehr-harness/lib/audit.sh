@@ -257,22 +257,17 @@ ehr_audit_compound_drift() {
   local harness_json="$project_root/.claude/HARNESS.json"
   [[ -f "$harness_json" ]] || { echo ""; return 0; }
 
-  # 1) JSON 의 compounds[].id 추출 (ehr_cycle.compounds[] 하위 id 만, promoted[] 제외)
-  #    간단한 grep 기반 파싱: "ehr_cycle" 블록 내부의 "id": "..." 만 고름.
+  # 1) JSON 의 ehr_cycle.compounds[].id 추출 — node 기반 (포맷 불문: compact/pretty 모두)
   local json_ids
-  json_ids=$(awk '
-    /"ehr_cycle"/ { in_cycle=1 }
-    in_cycle && /"compounds"/ { in_compounds=1 }
-    in_compounds && /"promoted"/ { in_compounds=0 }
-    in_cycle && /\}\s*$/ && !/"id"/ && !/"ts"/ && !/"level"/ { }
-    in_compounds && /"id":/ {
-      match($0, /"id":\s*"[^"]+"/)
-      if (RSTART) {
-        s=substr($0, RSTART+6, RLENGTH-7)
-        print s
-      }
-    }
-  ' "$harness_json" 2>/dev/null | sort -u)
+  json_ids=$(HARNESS_JSON="$harness_json" node -e "
+    try {
+      const m = JSON.parse(require('fs').readFileSync(process.env.HARNESS_JSON, 'utf8'));
+      const ids = (m.ehr_cycle && Array.isArray(m.ehr_cycle.compounds))
+        ? m.ehr_cycle.compounds.map(c => c.id).filter(Boolean)
+        : [];
+      process.stdout.write(ids.sort().join('\n'));
+    } catch (e) { process.exit(0); }
+  " 2>/dev/null)
 
   # 2) 실제 파일 블록 스캔 (reference/ + skills/domain-knowledge/)
   local marker_ids=""
@@ -314,11 +309,23 @@ ehr_audit_stale_promotion() {
   local harness_json="$project_root/.claude/HARNESS.json"
   [[ -f "$harness_json" ]] || return 0
 
-  grep -oE '"backup":\s*"[^"]+"' "$harness_json" 2>/dev/null \
-    | sed 's/.*"\([^"]*\)".*/\1/' \
-    | while read -r bk_path; do
-        [[ -f "$project_root/$bk_path" ]] || echo "stale_promotion::$bk_path"
-      done
+  local backups
+  backups=$(HARNESS_JSON="$harness_json" node -e "
+    try {
+      const m = JSON.parse(require('fs').readFileSync(process.env.HARNESS_JSON, 'utf8'));
+      const rows = (m.ehr_cycle && Array.isArray(m.ehr_cycle.promoted))
+        ? m.ehr_cycle.promoted.filter(p => p && p.backup && !p.backup_cleaned).map(p => p.backup)
+        : [];
+      process.stdout.write(rows.join('\n'));
+    } catch (e) { process.exit(0); }
+  " 2>/dev/null)
+
+  if [[ -n "$backups" ]]; then
+    while IFS= read -r bk_path; do
+      [[ -z "$bk_path" ]] && continue
+      [[ -f "$project_root/$bk_path" ]] || echo "stale_promotion::$bk_path"
+    done <<< "$backups"
+  fi
 }
 
 # EHR-PREFERENCES 파싱 가능성 검증
