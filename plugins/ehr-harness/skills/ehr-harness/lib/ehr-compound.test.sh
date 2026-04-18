@@ -43,4 +43,26 @@ diff -u "$FX/case_compound_preserve.expected.md" "$TMP/target.md" >/dev/null \
   || fail "case_compound_preserve: diff mismatch
 $(diff -u "$FX/case_compound_preserve.expected.md" "$TMP/target.md")"
 
+# ── ehr_compound_remove: 블록 제거 ──
+cp "$FX/case_compound_preserve.md" "$TMP/target.md"
+ehr_compound_remove "$TMP/target.md" "EHR-COMPOUND" "exists"
+grep -q "EHR-COMPOUND:BEGIN exists" "$TMP/target.md" \
+  && fail "ehr_compound_remove: 블록이 여전히 존재" \
+  || pass "ehr_compound_remove: 블록 제거됨"
+# 외부 문단은 살아있어야 함
+grep -q "사용자가 수동 작성한 설명 문단" "$TMP/target.md" \
+  && pass "ehr_compound_remove: 외부 영역 보존" \
+  || fail "ehr_compound_remove: 외부 영역 손실"
+
+# ── ehr_compound_list: id 목록 ──
+printf '%s\n' '<!-- EHR-COMPOUND:BEGIN a1 -->' 'x' '<!-- EHR-COMPOUND:END a1 -->' \
+              '<!-- EHR-COMPOUND:BEGIN b2 -->' 'y' '<!-- EHR-COMPOUND:END b2 -->' > "$TMP/list.md"
+RESULT=$(ehr_compound_list "$TMP/list.md" "EHR-COMPOUND")
+echo "$RESULT" | grep -q '^a1$' \
+  && pass "ehr_compound_list: a1 감지" \
+  || fail "ehr_compound_list: a1 missing ($RESULT)"
+echo "$RESULT" | grep -q '^b2$' \
+  && pass "ehr_compound_list: b2 감지" \
+  || fail "ehr_compound_list: b2 missing ($RESULT)"
+
 echo "=== ehr-compound.test.sh: 모든 테스트 통과 ==="

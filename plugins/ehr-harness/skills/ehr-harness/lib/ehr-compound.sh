@@ -61,3 +61,27 @@ ehr_compound_upsert() {
     mv "$tmp" "$file"
   fi
 }
+
+# 블록 제거. 없으면 아무 일도 안 함.
+ehr_compound_remove() {
+  local file="$1" domain="$2" id="$3"
+  local range begin end
+  range=$(ehr_marker_find_range "$file" "$domain" "$id")
+  [[ -z "$range" ]] && return 0
+  begin=$(echo "$range" | awk '{print $1}')
+  end=$(echo "$range" | awk '{print $2}')
+  local tmp
+  tmp=$(mktemp)
+  {
+    sed -n "1,$((begin-1))p" "$file"
+    sed -n "$((end+1)),\$p" "$file"
+  } > "$tmp"
+  mv "$tmp" "$file"
+}
+
+# 주어진 도메인의 모든 id 목록을 한 줄에 하나씩 출력.
+ehr_compound_list() {
+  local file="$1" domain="$2"
+  grep -oE "<!-- ${domain}:BEGIN [A-Za-z0-9_-]+" "$file" 2>/dev/null \
+    | sed "s|<!-- ${domain}:BEGIN ||"
+}
