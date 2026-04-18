@@ -65,4 +65,36 @@ echo "$RESULT" | grep -q '^b2$' \
   && pass "ehr_compound_list: b2 감지" \
   || fail "ehr_compound_list: b2 missing ($RESULT)"
 
+# ── 불변식 1 보호: corrupt 마커 상태에서 upsert 는 abort + 외부 prose 보존 ──
+# case A: 2 BEGIN + 1 END (orphan begin) — user prose 가 있어야 보존 검증 가능
+cp "$FX/case_marker_corrupt_dup_begin.md" "$TMP/corrupt_a.md"
+BEFORE=$(cat "$TMP/corrupt_a.md")
+ehr_compound_upsert "$TMP/corrupt_a.md" "EHR-COMPOUND" "X" "- 갱신 시도" 2>/dev/null \
+  && fail "corrupt_dup_begin: upsert 가 abort 되어야 함 (0 리턴)" \
+  || pass "corrupt_dup_begin: upsert abort (non-zero 리턴)"
+AFTER=$(cat "$TMP/corrupt_a.md")
+[[ "$BEFORE" == "$AFTER" ]] \
+  && pass "corrupt_dup_begin: 파일 내용 불변 (외부 prose 보존)" \
+  || fail "corrupt_dup_begin: 파일이 변경됨 — 불변식 1 위반"
+
+# case B: 1 BEGIN + 0 END (missing end)
+cp "$FX/case_marker_corrupt_missing_end.md" "$TMP/corrupt_b.md"
+BEFORE=$(cat "$TMP/corrupt_b.md")
+ehr_compound_upsert "$TMP/corrupt_b.md" "EHR-COMPOUND" "Y" "- 갱신 시도" 2>/dev/null \
+  && fail "corrupt_missing_end: upsert 가 abort 되어야 함" \
+  || pass "corrupt_missing_end: upsert abort"
+AFTER=$(cat "$TMP/corrupt_b.md")
+[[ "$BEFORE" == "$AFTER" ]] \
+  && pass "corrupt_missing_end: 파일 내용 불변" \
+  || fail "corrupt_missing_end: 파일이 변경됨 — 불변식 1 위반"
+
+# 신규 파일(0 BEGIN + 0 END) 은 정상 동작해야 함
+rm -f "$TMP/fresh.md"
+ehr_compound_upsert "$TMP/fresh.md" "EHR-COMPOUND" "fresh-id" "- 신규 내용" \
+  && pass "fresh file: upsert 성공" \
+  || fail "fresh file: upsert 실패"
+grep -q "EHR-COMPOUND:BEGIN fresh-id" "$TMP/fresh.md" \
+  && pass "fresh file: 블록 생성됨" \
+  || fail "fresh file: 블록 없음"
+
 echo "=== ehr-compound.test.sh: 모든 테스트 통과 ==="
