@@ -3,5 +3,74 @@ description: superpowers:receiving-code-review + release-reviewer + db-impact-re
 ---
 
 <!-- EHR-COMMAND:BEGIN review -->
-(본문은 Phase 2 Task 11 에서 작성)
+# /ehr:review — 다중 관점 릴리스 리뷰
+
+**프로파일:** {{PROFILE}} / 권한 테이블={{AUTH_TABLES}} / 크리티컬 프로시저={{CRITICAL_PROCS}}
+
+## 입력
+- 인자: 브랜치/커밋 범위 (예: `HEAD~3..HEAD`). 생략 시 현재 워킹트리 비교.
+
+## 수행 순서
+
+1. **변경 요약 수집:**
+   - git 감지 시: `git diff --stat <range>`
+   - 없으면: 편집된 파일 목록을 사용자에게 요청
+
+2. **병렬 리뷰 트리거** (Task 툴):
+   - 주 리뷰: `superpowers:receiving-code-review` 스킬로 일반 관점 리뷰 수행
+   - 에이전트 리뷰: `release-reviewer` 를 Task 로 호출 — HR/급여/권한 정합성
+   - DB 관련 변경(아래 분류 규칙 매칭 시) `db-impact-reviewer` 를 Task 로 호출
+
+3. **통합 리포트 작성:** 3개 결과를 섹션별로 병합. 충돌 의견은 나란히 기재.
+
+4. **최종 PASS/FAIL 결정:**
+   - 어느 하나라도 FAIL → 전체 FAIL
+   - 모두 PASS → 전체 PASS
+   - NEEDS_REVISION 이 하나라도 있으면 NEEDS_REVISION
+
+5. **출력 저장:** `docs/ehr/reviews/YYYY-MM-DD-<topic>.md`
+
+## 출력 템플릿
+
+```markdown
+# [리뷰] <제목>
+
+- 범위: <HEAD~3..HEAD>
+- 프로파일: {{PROFILE}}
+
+## 요약
+- 주 리뷰: PASS
+- release-reviewer: NEEDS_REVISION
+- db-impact-reviewer: N/A (DB 변경 없음)
+
+## 주 리뷰 (superpowers:receiving-code-review)
+<...결과...>
+
+## release-reviewer
+<...결과...>
+
+## db-impact-reviewer
+<...결과 또는 "해당 변경 범위에 DB 파일 없음">
+
+## 종합 판정
+NEEDS_REVISION — release-reviewer 의 급여 계산 정합성 이슈 반영 필요
+```
+
+## DB 변경 감지 규칙
+다음 중 하나라도 변경 파일 목록에 있으면 `db-impact-reviewer` 호출:
+- `**/*.sql`
+- `**/mapper/**/*.xml`
+- `**/*-mapping-query.xml` / `**/*-sql-query.xml`
+- `**/db/procedures/**`, `**/db/functions/**`, `**/db/tables/**`
+
+## 크리티컬 경보
+다음 조건 중 하나라도 걸리면 리포트 최상단에 ⚠ CRITICAL 배지:
+- 변경 파일에 `{{CRITICAL_PROCS}}` 중 하나의 이름이 포함
+- `{{AUTH_TABLES}}` 를 직접 UPDATE 하는 SQL 추가
+- 마감 후 대상 테이블 직접 UPDATE 패턴 감지
+
+## 금지사항
+- 실제 코드 편집 금지 (리뷰만)
+- 커밋·머지 자동 수행 금지 (사용자 판단)
+- 외부 네트워크 호출 금지
 <!-- EHR-COMMAND:END review -->
