@@ -1949,6 +1949,60 @@ rm -f "$HS_VALIDATE_ERR"
 → legacy adopt 모드의 경우, Step 3 의 Write 를 모두 스킵했지만, 현재 디스크의 파일 sha 를 기준으로 outputs 를 채우므로 "현 상태 인정" 이 정확히 표현된다.
 → `UPDATE_STRATEGY=4` (취소) 일 때는 Step 4 자체가 실행되지 않으므로 매니페스트도 변하지 않는다.
 
+### 4-I. EHR Cycle 자산 생성 (순서: 4-G 이후, 4-H 이전)
+
+사용자 자산 누적의 폐곡선을 만들기 위한 자산을 이 단계에서 심는다. 이미 하네스가 찍힌 상태(`.claude/agents/`, `.claude/skills/`, `AGENTS.md`, `reference/*` 등)에 다음을 추가한다.
+
+**전제:**
+- Step 4-G 에서 `HARNESS.json` 이 기록되어 있다
+- `auth_model`·`analysis` 필드에서 치환자 값을 읽을 수 있다
+- 4대 불변식을 준수한다 (사용자가 기존에 쌓은 `EHR-COMPOUND`·`EHR-PROMOTED`·`EHR-PREFERENCES` 블록 및 `.ehr-bak/`, `docs/ehr/*` 는 건드리지 않는다)
+
+**처리 순서:**
+
+1. **치환자 테이블 구성** (HARNESS.json 에서 읽음):
+
+| 치환자 | 출처 |
+|---|---|
+| `{{PROFILE}}` | `.profile` |
+| `{{AUTH_SERVICE}}` | `auth_model.auth_service_class` |
+| `{{AUTH_TABLES}}` | `auth_model.auth_tables[]` (쉼표 join) |
+| `{{SESSION_VARS}}` | `auth_model.session_vars[]` (쉼표 join) |
+| `{{COMMON_CONTROLLERS}}` | `auth_model.common_controllers[]` (쉼표 join) |
+| `{{CRITICAL_PROCS}}` | `analysis.critical_proc_found[]` (쉼표 join) |
+| `{{MODULE_LIST}}` | `analysis.module_map[].name` (쉼표 join) |
+
+2. **커맨드 5종 생성** — `.claude/commands/ehr/<cmd>.md` 각각 (ideate, plan, work, review, compound):
+   - 소스: `$PLUGIN_ROOT/profiles/shared/commands/ehr/<cmd>.md.skel`
+   - `{{...}}` 치환 적용
+   - 대상 파일이 이미 존재하면 **마커 내부만 덮어쓰기** (`EHR-COMMAND:BEGIN`/`END` 외부 사용자 편집 보존).
+   - 없으면 신규 생성.
+
+3. **에이전트 추가** — `.claude/agents/db-impact-reviewer.md`:
+   - 소스: `$PLUGIN_ROOT/profiles/{{PROFILE}}/agents/db-impact-reviewer.md`
+   - 치환 적용 후 **전체 덮어쓰기**(플러그인 자산). 단, 파일에 `EHR-PROMOTED` 블록이 있으면 그 블록만 보존해 병합.
+
+4. **CLAUDE.md 블록 삽입** (섹션 머지 — 기존 `case_c_marker_wrapped` 패턴):
+   - `EHR-ROUTING` 블록: 고정 구조, 항상 최신으로 덮어씀
+   - `EHR-PREFERENCES` 블록: **파일에 이미 있으면 절대 덮어쓰지 않음**, 없으면 기본값으로 신규 생성
+
+5. **HARNESS.json 갱신:**
+   - 기존 v3 이었으면 `ehr_cycle: { version:1, compounds:[], promoted:[], preferences_history:[] }` 주입
+   - `outputs[]` 에 신규 7개 파일 경로 + sha256 해시 추가
+   - `schema_version: 4`, `plugin_version: "1.9.0"` 기록
+
+**4대 불변식 재확인:**
+- `reference/CODE_MAP.md`·`DB_MAP.md`·`skills/domain-knowledge/SKILL.md` 의 `EHR-COMPOUND:*` 블록
+- `agents/*.md`·`skills/**/SKILL.md` 의 `EHR-PROMOTED:*` 블록
+- `CLAUDE.md` 의 `EHR-PREFERENCES` 블록
+- `.ehr-bak/`, `docs/ehr/*` 파일
+
+위 4종은 **이 단계에서 절대 건드리지 않는다**. 오직 `EHR-COMMAND`·`EHR-ROUTING` 블록 내부만 갱신 대상이다.
+
+**머지 도구:** `lib/ehr-compound.sh` 의 `ehr_compound_upsert` 함수 활용 (마커 내부 덮어쓰기 + 외부 영역 보존).
+
+---
+
 ### 4-H. 완료 배너 (모든 모드의 최종 출력)
 
 4-G 까지 정상 수행되었다면 Step 4-F 의 긴 보고 **맨 마지막에** 아래 4줄짜리 배너를 출력한다. "누가 봐도 작업이 끝났음"을 한눈에 알 수 있도록 시각적 구분선 + 체크 이모지 + 핵심 사실 3가지(프로파일·모드·갱신 파일 수)만 압축해 찍는다.
