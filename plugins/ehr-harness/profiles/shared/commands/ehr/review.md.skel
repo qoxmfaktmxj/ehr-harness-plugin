@@ -1,0 +1,7 @@
+---
+description: superpowers:receiving-code-review + release-reviewer + db-impact-reviewer 를 병렬 호출하는 다중 관점 리뷰.
+---
+
+<!-- EHR-COMMAND:BEGIN review -->
+(본문은 Phase 2 Task 11 에서 작성)
+<!-- EHR-COMMAND:END review -->

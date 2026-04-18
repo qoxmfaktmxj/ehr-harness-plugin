@@ -1,0 +1,7 @@
+---
+description: superpowers:executing-plans 를 래핑해 EHR 스킬(design-guide/screen-builder/db-query) 을 자동 라우팅하는 실행 커맨드.
+---
+
+<!-- EHR-COMMAND:BEGIN work -->
+(본문은 Phase 2 Task 13 에서 작성)
+<!-- EHR-COMMAND:END work -->
