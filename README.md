@@ -111,9 +111,14 @@ your-ehr5-project/
 # 2. 플러그인 설치
 /plugin install ehr-harness@ehr-harness
 
-# 3. 이후 업데이트
+# 3. superpowers 설치 (v1.9.0+ 필수 — /ehr:plan/work/review 가 내부에서 호출)
+/plugin install superpowers@claude-plugins-official
+
+# 4. 이후 업데이트
 /plugin marketplace update
 ```
+
+위 4줄을 한 번에 긁어 실행하면 된다. `superpowers` 는 **필수** (옵션 아님) — `/ehr:plan` 이 `superpowers:writing-plans` 를, `/ehr:work` 가 `superpowers:executing-plans` 를, `/ehr:review` 가 `superpowers:receiving-code-review` 를 내부에서 호출하므로 없으면 3개 커맨드가 동작하지 않는다.
 
 설치 후, 어떤 EHR 프로젝트에서든 "하네스 만들어줘"를 사용할 수 있다.
 
@@ -128,11 +133,15 @@ git clone https://github.com/qoxmfaktmxj/ehr-harness-plugin.git ~/Desktop/dev/eh
 
 # 3. 플러그인 설치
 /plugin install ehr-harness@ehr-harness
+
+# 4. superpowers 설치 (필수)
+/plugin install superpowers@claude-plugins-official
 ```
 
 ### 사전 요구사항
 
 - Claude Code (CLI, Desktop App, 또는 Web App)
+- **superpowers 플러그인** (v1.9.0+ 전제 — `/ehr:plan`/`work`/`review` 내부 호출 경로)
 - EHR 프로젝트 소스 코드 (로컬에 체크아웃된 상태)
 - (선택) Oracle/Tibero DB 접속 가능 상태 (프로시저/트리거 전체 목록 수집용)
 
