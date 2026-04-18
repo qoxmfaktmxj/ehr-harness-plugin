@@ -1880,6 +1880,137 @@ HARNESS_MODE: {{HARNESS_MODE}}
 - 플러그인이 갱신되면 `/ehr-harness` 다시 실행해서 변경분 반영 (3-bucket diff 가 자동으로 안전한 항목만 덮어씀)
 ```
 
+### 4-I. EHR Cycle 자산 생성 (Step 4-G 직전 실행)
+
+사용자 자산 누적의 폐곡선을 만들기 위해 `.claude/commands/ehr/*.md` 5종, `.claude/agents/db-impact-reviewer.md`, 그리고 `CLAUDE.md` 의 `EHR-ROUTING` / `EHR-PREFERENCES` 블록을 심는다. **이 단계는 반드시 Step 4-G 이전에 실행되어야 한다** — 그래야 Step 4-G 가 신규 7개 파일의 sha256 을 `outputs[]` 에 포함시킨다.
+
+**4대 불변식 재확인:** 다음 4종은 이 단계에서 **절대 건드리지 않는다**.
+- `reference/CODE_MAP.md`·`DB_MAP.md`·`skills/domain-knowledge/SKILL.md` 의 `EHR-COMPOUND:*` 블록
+- `agents/*.md`·`skills/**/SKILL.md` 의 `EHR-PROMOTED:*` 블록
+- `CLAUDE.md` 의 `EHR-PREFERENCES` 블록 (이미 있으면 그대로 둠)
+- `.ehr-bak/`, `docs/ehr/*` 파일
+
+```bash
+source "$PLUGIN_ROOT/skills/ehr-harness/lib/ehr-compound.sh"
+
+# ── 4-I.1. 치환자 테이블 구성 (Step 2 에서 빌드된 값 사용) ──
+SUBST_PROFILE="$PROFILE"
+SUBST_AUTH_SERVICE=$(AJ="$AUTH_MODEL_JSON" node -e "
+  try { const m=JSON.parse(process.env.AJ); process.stdout.write(m.auth_service_class||''); } catch(e){}
+")
+SUBST_AUTH_TABLES=$(AJ="$AUTH_MODEL_JSON" node -e "
+  try { const m=JSON.parse(process.env.AJ); process.stdout.write((m.auth_tables||[]).join(', ')); } catch(e){}
+")
+SUBST_SESSION_VARS=$(AJ="$AUTH_MODEL_JSON" node -e "
+  try { const m=JSON.parse(process.env.AJ); process.stdout.write((m.session_vars||[]).join(', ')); } catch(e){}
+")
+SUBST_COMMON_CONTROLLERS=$(AJ="$AUTH_MODEL_JSON" node -e "
+  try { const m=JSON.parse(process.env.AJ); process.stdout.write((m.common_controllers||[]).join(', ')); } catch(e){}
+")
+SUBST_CRITICAL_PROCS=$(AJ="$ANALYSIS_JSON" node -e "
+  try { const m=JSON.parse(process.env.AJ); process.stdout.write((m.critical_proc_found||[]).join(', ')); } catch(e){}
+")
+SUBST_MODULE_LIST=$(AJ="$ANALYSIS_JSON" node -e "
+  try { const m=JSON.parse(process.env.AJ); process.stdout.write((m.module_map||[]).map(x=>x.name).join(', ')); } catch(e){}
+")
+
+# ── 4-I.2. 커맨드 5종 생성 (마커 내부 덮어쓰기, 외부 사용자 편집 보존) ──
+mkdir -p ".claude/commands/ehr"
+for cmd in ideate plan work review compound; do
+  SKEL="$PLUGIN_ROOT/profiles/shared/commands/ehr/${cmd}.md.skel"
+  DST=".claude/commands/ehr/${cmd}.md"
+  [ ! -f "$SKEL" ] && continue
+
+  # frontmatter 는 Claude Code 가 slash command 인식에 필요 → 파일 없으면 먼저 통째 복사
+  if [ ! -f "$DST" ]; then
+    cp "$SKEL" "$DST"
+  fi
+
+  # 본문(EHR-COMMAND 마커 내부) 추출 → 치환 적용 → upsert
+  BODY=$(awk '/<!-- EHR-COMMAND:BEGIN /,/<!-- EHR-COMMAND:END /' "$SKEL" \
+    | sed '1d;$d' \
+    | sed "s|{{PROFILE}}|$SUBST_PROFILE|g; \
+           s|{{AUTH_SERVICE}}|$SUBST_AUTH_SERVICE|g; \
+           s|{{AUTH_TABLES}}|$SUBST_AUTH_TABLES|g; \
+           s|{{SESSION_VARS}}|$SUBST_SESSION_VARS|g; \
+           s|{{COMMON_CONTROLLERS}}|$SUBST_COMMON_CONTROLLERS|g; \
+           s|{{CRITICAL_PROCS}}|$SUBST_CRITICAL_PROCS|g; \
+           s|{{MODULE_LIST}}|$SUBST_MODULE_LIST|g")
+
+  # 마커 내부만 덮어씀 — 외부 사용자 편집 보존. corrupt 상태면 upsert 가 abort.
+  if ! ehr_compound_upsert "$DST" "EHR-COMMAND" "$cmd" "$BODY"; then
+    echo "⚠ .claude/commands/ehr/${cmd}.md 마커 corruption — 수동 정정 필요" >&2
+  fi
+done
+
+# ── 4-I.3. db-impact-reviewer 에이전트 배포 (프로파일별) ──
+mkdir -p ".claude/agents"
+AGENT_SRC="$PLUGIN_ROOT/profiles/$PROFILE/agents/db-impact-reviewer.md"
+AGENT_DST=".claude/agents/db-impact-reviewer.md"
+if [ -f "$AGENT_SRC" ]; then
+  # EHR-PROMOTED 블록 있으면 임시 저장 → 전체 덮어쓰기 → 복원
+  PROMOTED_CACHE=""
+  if [ -f "$AGENT_DST" ] && grep -q "EHR-PROMOTED:BEGIN" "$AGENT_DST"; then
+    PROMOTED_CACHE=$(awk '/<!-- EHR-PROMOTED:BEGIN /,/<!-- EHR-PROMOTED:END /' "$AGENT_DST")
+  fi
+  # 치환 적용해서 덮어쓰기
+  sed "s|{{PROFILE}}|$SUBST_PROFILE|g; \
+       s|{{AUTH_SERVICE}}|$SUBST_AUTH_SERVICE|g; \
+       s|{{AUTH_TABLES}}|$SUBST_AUTH_TABLES|g; \
+       s|{{SESSION_VARS}}|$SUBST_SESSION_VARS|g; \
+       s|{{COMMON_CONTROLLERS}}|$SUBST_COMMON_CONTROLLERS|g; \
+       s|{{CRITICAL_PROCS}}|$SUBST_CRITICAL_PROCS|g" "$AGENT_SRC" > "$AGENT_DST"
+  # EHR-PROMOTED 블록 복원 (파일 말미에 append)
+  if [ -n "$PROMOTED_CACHE" ]; then
+    echo "" >> "$AGENT_DST"
+    printf '%s\n' "$PROMOTED_CACHE" >> "$AGENT_DST"
+  fi
+fi
+
+# ── 4-I.4. CLAUDE.md 블록 삽입 ──
+# EHR-ROUTING: 구조 고정 → 항상 최신으로 덮어씀 (skel 에서 추출)
+# EHR-PREFERENCES: 이미 있으면 절대 덮어쓰지 않음 (불변식 3)
+CLAUDE_SKEL="$PLUGIN_ROOT/profiles/$PROFILE/skeleton/CLAUDE.md.skel"
+CLAUDE_MD="CLAUDE.md"
+if [ -f "$CLAUDE_SKEL" ] && [ -f "$CLAUDE_MD" ]; then
+  # EHR-ROUTING 섹션을 skel 에서 추출해서 CLAUDE.md 의 해당 섹션 교체
+  ROUTING_BODY=$(awk '/<!-- EHR-ROUTING:BEGIN/,/<!-- EHR-ROUTING:END/' "$CLAUDE_SKEL" \
+    | sed '1d;$d')
+  # ROUTING 블록 전체를 단일 마커 pair 로 관리 (id 없이 domain=EHR-ROUTING 으로 대체)
+  # ehr-compound.sh 의 upsert 은 id 필수이므로 여기선 별도 sed 교체를 사용.
+  if grep -q "<!-- EHR-ROUTING:BEGIN" "$CLAUDE_MD"; then
+    # 블록 통째 교체
+    awk -v body="$ROUTING_BODY" '
+      /<!-- EHR-ROUTING:BEGIN/ { print; in_block=1; print body; next }
+      /<!-- EHR-ROUTING:END/   { in_block=0; print; next }
+      !in_block { print }
+    ' "$CLAUDE_MD" > "$CLAUDE_MD.tmp" && mv "$CLAUDE_MD.tmp" "$CLAUDE_MD"
+  else
+    # 신규 삽입 — 파일 말미에 append
+    printf '\n<!-- EHR-ROUTING:BEGIN -->\n%s\n<!-- EHR-ROUTING:END -->\n' "$ROUTING_BODY" >> "$CLAUDE_MD"
+  fi
+
+  # EHR-PREFERENCES: 이미 있으면 손대지 않음 (불변식 3)
+  if ! grep -q "<!-- EHR-PREFERENCES:BEGIN" "$CLAUDE_MD"; then
+    PREFS_BODY=$(awk '/<!-- EHR-PREFERENCES:BEGIN/,/<!-- EHR-PREFERENCES:END/' "$CLAUDE_SKEL" \
+      | sed '1d;$d')
+    printf '\n<!-- EHR-PREFERENCES:BEGIN -->\n%s\n<!-- EHR-PREFERENCES:END -->\n' "$PREFS_BODY" >> "$CLAUDE_MD"
+  fi
+fi
+
+# ── 4-I.5. SOURCE_MAP 확장 — Step 4-G 가 신규 7개 파일의 sha256 을 outputs[] 에 기록하도록 추가 ──
+for cmd in ideate plan work review compound; do
+  SOURCE_MAP="${SOURCE_MAP}
+profiles/shared/commands/ehr/${cmd}.md.skel|$PLUGIN_ROOT/profiles/shared/commands/ehr/${cmd}.md.skel|.claude/commands/ehr/${cmd}.md|.claude/commands/ehr/${cmd}.md"
+done
+SOURCE_MAP="${SOURCE_MAP}
+profiles/$PROFILE/agents/db-impact-reviewer.md|$PLUGIN_ROOT/profiles/$PROFILE/agents/db-impact-reviewer.md|.claude/agents/db-impact-reviewer.md|.claude/agents/db-impact-reviewer.md"
+```
+
+→ 다음 Step 4-G 가 확장된 `SOURCE_MAP` 을 순회해 신규 7개 파일의 sha256 을 `outputs[]` 에 담고, `hs_write_manifest` 를 통해 `schema_version: 4` + `ehr_cycle` 필드까지 한 번에 기록한다.
+
+---
+
 ### 4-G. HARNESS.json 갱신 (모든 모드에서 마지막으로 수행)
 
 ```bash
@@ -1921,7 +2052,9 @@ if [ -z "$GEN_AT" ]; then
   GEN_AT=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)
 fi
 
-hs_write_manifest "$MANIFEST" "$PLUGIN_VERSION" "$PROFILE" "$SOURCES_JSON" "$OUTPUTS_JSON" "$GEN_AT" "$AUTH_MODEL_JSON" "$DB_VERIFICATION_JSON" "$DDL_AUTH_JSON" "$ANALYSIS_JSON"
+# ehr_cycle 보존: 4-I 에서 이미 신규 파일을 SOURCE_MAP 에 추가했다면 outputs 에 반영됐다.
+# ehr_cycle 필드는 기존 매니페스트에서 승계되도록 null 로 전달 (hs_write_manifest 내부에서 자동 처리).
+hs_write_manifest "$MANIFEST" "$PLUGIN_VERSION" "$PROFILE" "$SOURCES_JSON" "$OUTPUTS_JSON" "$GEN_AT" "$AUTH_MODEL_JSON" "$DB_VERIFICATION_JSON" "$DDL_AUTH_JSON" "$ANALYSIS_JSON" "null"
 
 # 쓰기 직후 유효성 검증 — 손상된 매니페스트가 저장됐을 가능성을 즉시 감지
 # (실패 시 다음 실행에서 legacy 로 분류되어 adopt 질문이 반복되는 혼란 방지)
@@ -1929,12 +2062,16 @@ HS_VALIDATE_ERR=$(mktemp 2>/dev/null || echo "/tmp/hs-validate.$$.err")
 if MANIFEST_FILE="$MANIFEST" node -e "
   const fs = require('fs');
   const m = JSON.parse(fs.readFileSync(process.env.MANIFEST_FILE, 'utf8'));
-  const required = ['schema_version', 'plugin_version', 'profile', 'generated_at', 'sources', 'outputs'];
+  const required = ['schema_version', 'plugin_version', 'profile', 'generated_at', 'sources', 'outputs', 'ehr_cycle'];
   const missing = required.filter(k => !(k in m));
   if (missing.length) { throw new Error('missing fields: ' + missing.join(', ')); }
-  if (m.schema_version !== 3) { throw new Error('unexpected schema_version: ' + JSON.stringify(m.schema_version) + ' (expected 3)'); }
+  if (m.schema_version !== 4) { throw new Error('unexpected schema_version: ' + JSON.stringify(m.schema_version) + ' (expected 4)'); }
+  if (!m.ehr_cycle || typeof m.ehr_cycle !== 'object') { throw new Error('ehr_cycle must be object'); }
+  const req2 = ['compounds', 'promoted', 'preferences_history'];
+  const miss2 = req2.filter(k => !Array.isArray(m.ehr_cycle[k]));
+  if (miss2.length) { throw new Error('ehr_cycle.* arrays missing: ' + miss2.join(', ')); }
 " 2>"$HS_VALIDATE_ERR"; then
-  echo "✓ HARNESS.json 갱신 + 유효성 검증: plugin_version=$PLUGIN_VERSION, profile=$PROFILE, schema_version=3"
+  echo "✓ HARNESS.json 갱신 + 유효성 검증: plugin_version=$PLUGIN_VERSION, profile=$PROFILE, schema_version=4"
 else
   echo "⚠ HARNESS.json 유효성 검증 실패 — 파일이 손상됐을 가능성" >&2
   echo "   사유: $(cat "$HS_VALIDATE_ERR")" >&2
@@ -1948,60 +2085,6 @@ rm -f "$HS_VALIDATE_ERR"
 → 이 단계는 모든 모드(fresh / legacy adopt / stamped 업데이트)의 마지막에 무조건 한 번 실행된다.
 → legacy adopt 모드의 경우, Step 3 의 Write 를 모두 스킵했지만, 현재 디스크의 파일 sha 를 기준으로 outputs 를 채우므로 "현 상태 인정" 이 정확히 표현된다.
 → `UPDATE_STRATEGY=4` (취소) 일 때는 Step 4 자체가 실행되지 않으므로 매니페스트도 변하지 않는다.
-
-### 4-I. EHR Cycle 자산 생성 (순서: 4-G 이후, 4-H 이전)
-
-사용자 자산 누적의 폐곡선을 만들기 위한 자산을 이 단계에서 심는다. 이미 하네스가 찍힌 상태(`.claude/agents/`, `.claude/skills/`, `AGENTS.md`, `reference/*` 등)에 다음을 추가한다.
-
-**전제:**
-- Step 4-G 에서 `HARNESS.json` 이 기록되어 있다
-- `auth_model`·`analysis` 필드에서 치환자 값을 읽을 수 있다
-- 4대 불변식을 준수한다 (사용자가 기존에 쌓은 `EHR-COMPOUND`·`EHR-PROMOTED`·`EHR-PREFERENCES` 블록 및 `.ehr-bak/`, `docs/ehr/*` 는 건드리지 않는다)
-
-**처리 순서:**
-
-1. **치환자 테이블 구성** (HARNESS.json 에서 읽음):
-
-| 치환자 | 출처 |
-|---|---|
-| `{{PROFILE}}` | `.profile` |
-| `{{AUTH_SERVICE}}` | `auth_model.auth_service_class` |
-| `{{AUTH_TABLES}}` | `auth_model.auth_tables[]` (쉼표 join) |
-| `{{SESSION_VARS}}` | `auth_model.session_vars[]` (쉼표 join) |
-| `{{COMMON_CONTROLLERS}}` | `auth_model.common_controllers[]` (쉼표 join) |
-| `{{CRITICAL_PROCS}}` | `analysis.critical_proc_found[]` (쉼표 join) |
-| `{{MODULE_LIST}}` | `analysis.module_map[].name` (쉼표 join) |
-
-2. **커맨드 5종 생성** — `.claude/commands/ehr/<cmd>.md` 각각 (ideate, plan, work, review, compound):
-   - 소스: `$PLUGIN_ROOT/profiles/shared/commands/ehr/<cmd>.md.skel`
-   - `{{...}}` 치환 적용
-   - 대상 파일이 이미 존재하면 **마커 내부만 덮어쓰기** (`EHR-COMMAND:BEGIN`/`END` 외부 사용자 편집 보존).
-   - 없으면 신규 생성.
-
-3. **에이전트 추가** — `.claude/agents/db-impact-reviewer.md`:
-   - 소스: `$PLUGIN_ROOT/profiles/{{PROFILE}}/agents/db-impact-reviewer.md`
-   - 치환 적용 후 **전체 덮어쓰기**(플러그인 자산). 단, 파일에 `EHR-PROMOTED` 블록이 있으면 그 블록만 보존해 병합.
-
-4. **CLAUDE.md 블록 삽입** (섹션 머지 — 기존 `case_c_marker_wrapped` 패턴):
-   - `EHR-ROUTING` 블록: 고정 구조, 항상 최신으로 덮어씀
-   - `EHR-PREFERENCES` 블록: **파일에 이미 있으면 절대 덮어쓰지 않음**, 없으면 기본값으로 신규 생성
-
-5. **HARNESS.json 갱신:**
-   - 기존 v3 이었으면 `ehr_cycle: { version:1, compounds:[], promoted:[], preferences_history:[] }` 주입
-   - `outputs[]` 에 신규 7개 파일 경로 + sha256 해시 추가
-   - `schema_version: 4`, `plugin_version: "1.9.0"` 기록
-
-**4대 불변식 재확인:**
-- `reference/CODE_MAP.md`·`DB_MAP.md`·`skills/domain-knowledge/SKILL.md` 의 `EHR-COMPOUND:*` 블록
-- `agents/*.md`·`skills/**/SKILL.md` 의 `EHR-PROMOTED:*` 블록
-- `CLAUDE.md` 의 `EHR-PREFERENCES` 블록
-- `.ehr-bak/`, `docs/ehr/*` 파일
-
-위 4종은 **이 단계에서 절대 건드리지 않는다**. 오직 `EHR-COMMAND`·`EHR-ROUTING` 블록 내부만 갱신 대상이다.
-
-**머지 도구:** `lib/ehr-compound.sh` 의 `ehr_compound_upsert` 함수 활용 (마커 내부 덮어쓰기 + 외부 영역 보존).
-
----
 
 ### 4-H. 완료 배너 (모든 모드의 최종 출력)
 

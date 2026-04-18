@@ -9,7 +9,11 @@
 
 set -u
 
-HS_SCHEMA_VERSION=3
+HS_SCHEMA_VERSION=4
+# 이전 버전 중 stamped 로 간주하는 값 (마이그레이션 유예).
+# v3 사용자가 v1.9.0 플러그인으로 업데이트했을 때 즉시 legacy 로 재분류되어
+# adopt 플로우에 빠지는 혼란을 막는다. 다음 업데이트 시 매니페스트가 v4 로 갱신된다.
+HS_SCHEMA_VERSION_STAMPED="3 4"
 
 # ── sha256 계산 (cross-platform) ──
 hs_sha256() {
@@ -58,10 +62,13 @@ hs_is_legacy() {
   if [ -z "$sv" ]; then
     return 0  # legacy (missing schema_version)
   fi
-  if [ "$sv" != "$HS_SCHEMA_VERSION" ]; then
-    return 0  # legacy (version mismatch)
-  fi
-  return 1  # stamped
+  # HS_SCHEMA_VERSION_STAMPED 에 포함되면 stamped (v3/v4 공존 허용)
+  for allowed in $HS_SCHEMA_VERSION_STAMPED; do
+    if [ "$sv" = "$allowed" ]; then
+      return 1  # stamped
+    fi
+  done
+  return 0  # legacy (version not in allowed set)
 }
 
 # ── 매니페스트에서 outputs[path] 의 sha 조회 ──
@@ -138,6 +145,11 @@ hs_classify_file() {
 # ── 매니페스트 새로 작성 ──
 # args: manifest_path plugin_version profile sources_json outputs_json
 #       [generated_at] [auth_model_json] [db_verification_json] [ddl_authoring_json] [analysis_json]
+#       [ehr_cycle_json]
+# v4 확장: 11번째 인자 ehr_cycle_json.
+#   - "null" 또는 빈 값: 기존 manifest 의 ehr_cycle 을 보존 (없으면 기본 빈 구조 주입).
+#   - 유효 JSON: 해당 값으로 덮어씀.
+# 불변식 3: EHR-PREFERENCES 는 CLAUDE.md 에 저장되므로 본 함수는 관여하지 않음.
 hs_write_manifest() {
   local manifest_path="$1"
   local plugin_version="$2"
@@ -149,6 +161,7 @@ hs_write_manifest() {
   local db_verification_json="${8:-null}"
   local ddl_authoring_json="${9:-null}"
   local analysis_json="${10:-null}"
+  local ehr_cycle_json="${11:-null}"
   local updated_at
   updated_at=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)
 
@@ -163,6 +176,7 @@ hs_write_manifest() {
   DBV_JSON="$db_verification_json" \
   DDL_JSON="$ddl_authoring_json" \
   ANA_JSON="$analysis_json" \
+  EHR_JSON="$ehr_cycle_json" \
   GEN="$generated_at" \
   UPD="$updated_at" \
   SV="$HS_SCHEMA_VERSION" \
@@ -173,6 +187,17 @@ hs_write_manifest() {
       try { return JSON.parse(s); }
       catch(e) { console.error('hs_write_manifest: invalid JSON for ' + name + ': ' + e.message); process.exit(1); }
     };
+    // ehr_cycle 보존 규칙: 인자 null 이면 기존 매니페스트에서 승계, 없으면 기본 구조.
+    let ehrCycle = parse(process.env.EHR_JSON, 'ehr_cycle');
+    if (ehrCycle == null) {
+      try {
+        const prev = JSON.parse(fs.readFileSync(process.env.MFP, 'utf8'));
+        if (prev && prev.ehr_cycle) ehrCycle = prev.ehr_cycle;
+      } catch(e) { /* no previous manifest — fall through */ }
+    }
+    if (ehrCycle == null) {
+      ehrCycle = { version: 1, compounds: [], promoted: [], preferences_history: [] };
+    }
     const m={
       schema_version: Number(process.env.SV),
       plugin_name: 'ehr-harness',
@@ -186,8 +211,23 @@ hs_write_manifest() {
       db_verification: parse(process.env.DBV_JSON, 'db_verification'),
       ddl_authoring: parse(process.env.DDL_JSON, 'ddl_authoring'),
       analysis: parse(process.env.ANA_JSON, 'analysis'),
+      ehr_cycle: ehrCycle,
     };
     fs.writeFileSync(process.env.MFP, JSON.stringify(m, null, 2));
+  "
+}
+
+# ── 매니페스트에서 ehr_cycle 객체 JSON 문자열로 반환 (없으면 빈 구조) ──
+hs_get_ehr_cycle() {
+  local manifest_path="$1"
+  MFP="$manifest_path" node -e "
+    const empty = { version: 1, compounds: [], promoted: [], preferences_history: [] };
+    try {
+      const m = JSON.parse(require('fs').readFileSync(process.env.MFP, 'utf8'));
+      process.stdout.write(JSON.stringify(m.ehr_cycle || empty));
+    } catch(e) {
+      process.stdout.write(JSON.stringify(empty));
+    }
   "
 }
 
