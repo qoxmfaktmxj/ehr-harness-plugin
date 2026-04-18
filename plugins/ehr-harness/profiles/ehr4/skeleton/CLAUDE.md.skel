@@ -79,3 +79,59 @@ Spring MVC · Anyframe Query Mapping · Velocity · Java 8 · JSP · jQuery · I
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |------|----------|------|------|
 | {{GENERATED_DATE}} | 초기 생성 | 전체 | ehr-harness-plugin 자동 생성 |
+
+<!-- EHR-ROUTING:BEGIN -->
+## 9. EHR Cycle 라우팅 규칙
+
+사용자 요청을 받으면 다음 분류표로 **필요한 단계만 제안**한다 (강요 금지, 항상 "제안 → 수락/거부").
+
+### 분류표
+
+| 유형 | 예시 발화 | 적용 경로 |
+|---|---|---|
+| 조회/설명 | "이 프로시저 뭐함?" | 즉답 (procedure-tracer / domain-knowledge 읽기) |
+| 소규모 수정 | "라벨 오타 수정" | 직접 편집, git 감지 시 커밋 제안 |
+| 중규모 변경 | "근태에 컬럼 추가" | `/ehr:plan` → `/ehr:work` → `/ehr:review` 제안 |
+| 대규모/신기능 | "급여 로직 재설계" | `superpowers:brainstorming` → 풀 사이클 제안 |
+| 방향성 탐색 | "뭐부터 정리?" | `/ehr:ideate` 제안 |
+| 지식 회수 | "하네스에 정리" | `/ehr:compound` 즉시 |
+
+### 분류 신호
+
+- 파일 개수 ≥ `EHR-PREFERENCES.FILE_THRESHOLD` → 중규모 이상
+- 프로시저/DDL 변경 포함 → `db-impact-reviewer` 자동 게이트
+- 권한·급여·근태 키워드 → 리뷰 강화
+- 질문형 vs 명령형 구분
+
+### 선호 감지 휴리스틱
+
+사용자 발화에서 다음 패턴 감지 시 1회 확인 후 `/ehr:compound` 자동 트리거:
+- "물어보지마", "역질문하지마", "그냥 해" → `SUGGEST_MODE=silent`
+- "플랜 건너뛰어", "바로 편집" → `FILE_THRESHOLD` 상향 (+2)
+- "설명 줄여", "짧게" → `VERBOSE_EXPLANATION=false`
+
+감지 시 먼저 묻는다: *"항상 그렇게 할까요, 이번 세션만?"*. "항상" 이면 `/ehr:compound` 로 `EHR-PREFERENCES` 갱신.
+
+### 강제 경로
+
+사용자가 `/ehr:*` 를 직접 타이핑하면 분류 무시, 그대로 실행.
+
+### 출력 규약
+
+분류 결과를 짧게 먼저 밝힌 뒤 경로 제안:
+```
+[분류: 중규모 — 파일 4개 영향 예상]
+`/ehr:plan` 으로 시작할까요? 아니면 바로 편집?
+```
+<!-- EHR-ROUTING:END -->
+
+<!-- EHR-PREFERENCES:BEGIN -->
+# 이 블록은 `/ehr:compound` 가 사용자 선호로 갱신한다
+# 재생성은 이 블록을 절대 덮어쓰지 않는다 (불변식 3)
+FILE_THRESHOLD=3
+SUGGEST_MODE=ask
+VERBOSE_EXPLANATION=true
+AUTO_PROMOTE_AFTER=3
+BACKUP_RETENTION_DAYS=0
+# history
+<!-- EHR-PREFERENCES:END -->
