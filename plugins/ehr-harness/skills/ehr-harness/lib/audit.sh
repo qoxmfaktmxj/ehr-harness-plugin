@@ -245,3 +245,120 @@ save_audit_report() {
   mkdir -p "$(dirname "$path")"
   printf '%s\n' "$report" > "$path"
 }
+
+# ── EHR Cycle 드리프트 검출 (v4) ──────────────
+
+# HARNESS.json 의 compounds[].id 와 실제 파일 블록을 대조
+# 출력: 각 줄 "<type>:<id>:<file>"
+#   type = orphan_compound (json 에 있음, 파일에 없음)
+#        = orphan_marker   (파일에 있음, json 에 없음)
+ehr_audit_compound_drift() {
+  local project_root="$1"
+  local harness_json="$project_root/.claude/HARNESS.json"
+  [[ -f "$harness_json" ]] || { echo ""; return 0; }
+
+  # 1) JSON 의 compounds[].id 추출 (ehr_cycle.compounds[] 하위 id 만, promoted[] 제외)
+  #    간단한 grep 기반 파싱: "ehr_cycle" 블록 내부의 "id": "..." 만 고름.
+  local json_ids
+  json_ids=$(awk '
+    /"ehr_cycle"/ { in_cycle=1 }
+    in_cycle && /"compounds"/ { in_compounds=1 }
+    in_compounds && /"promoted"/ { in_compounds=0 }
+    in_cycle && /\}\s*$/ && !/"id"/ && !/"ts"/ && !/"level"/ { }
+    in_compounds && /"id":/ {
+      match($0, /"id":\s*"[^"]+"/)
+      if (RSTART) {
+        s=substr($0, RSTART+6, RLENGTH-7)
+        print s
+      }
+    }
+  ' "$harness_json" 2>/dev/null | sort -u)
+
+  # 2) 실제 파일 블록 스캔 (reference/ + skills/domain-knowledge/)
+  local marker_ids=""
+  for dir in "$project_root/reference" "$project_root/skills/domain-knowledge"; do
+    [[ -d "$dir" ]] || continue
+    marker_ids="$marker_ids$(find "$dir" -name "*.md" -type f 2>/dev/null -print0 \
+      | xargs -0 grep -hoE "<!-- EHR-COMPOUND:BEGIN [A-Za-z0-9_-]+" 2>/dev/null \
+      | sed 's|<!-- EHR-COMPOUND:BEGIN ||')"$'\n'
+  done
+  marker_ids=$(echo "$marker_ids" | grep -v '^$' | sort -u)
+
+  # 3) orphan_compound = json - marker
+  if [[ -n "$json_ids" ]]; then
+    comm -23 <(echo "$json_ids") <(echo "$marker_ids") 2>/dev/null \
+      | grep -v '^$' \
+      | while read -r id; do echo "orphan_compound:$id:(unknown file)"; done
+  fi
+
+  # 4) orphan_marker = marker - json
+  if [[ -n "$marker_ids" ]]; then
+    comm -13 <(echo "$json_ids") <(echo "$marker_ids") 2>/dev/null \
+      | grep -v '^$' \
+      | while read -r id; do
+          local file=""
+          for dir in "$project_root/reference" "$project_root/skills/domain-knowledge"; do
+            [[ -d "$dir" ]] || continue
+            local found
+            found=$(grep -rl "<!-- EHR-COMPOUND:BEGIN $id" "$dir" 2>/dev/null | head -1)
+            if [[ -n "$found" ]]; then file="$found"; break; fi
+          done
+          echo "orphan_marker:$id:${file:-?}"
+        done
+  fi
+}
+
+# Stale promotion 검출: promoted[].backup 이 실존하지 않음
+ehr_audit_stale_promotion() {
+  local project_root="$1"
+  local harness_json="$project_root/.claude/HARNESS.json"
+  [[ -f "$harness_json" ]] || return 0
+
+  grep -oE '"backup":\s*"[^"]+"' "$harness_json" 2>/dev/null \
+    | sed 's/.*"\([^"]*\)".*/\1/' \
+    | while read -r bk_path; do
+        [[ -f "$project_root/$bk_path" ]] || echo "stale_promotion::$bk_path"
+      done
+}
+
+# EHR-PREFERENCES 파싱 가능성 검증
+ehr_audit_preferences_parse() {
+  local project_root="$1"
+  local claude_md="$project_root/CLAUDE.md"
+  [[ -f "$claude_md" ]] || return 0
+
+  local begin end
+  begin=$(grep -n "<!-- EHR-PREFERENCES:BEGIN" "$claude_md" 2>/dev/null | head -1 | cut -d: -f1)
+  end=$(grep -n "<!-- EHR-PREFERENCES:END" "$claude_md" 2>/dev/null | head -1 | cut -d: -f1)
+
+  if [[ -z "$begin" || -z "$end" || "$begin" -ge "$end" ]]; then
+    echo "preferences_corruption::CLAUDE.md — 블록 구조 깨짐 (BEGIN/END 불일치)"
+    return 0
+  fi
+
+  # 블록 내부의 유효 key=value 엔트리 수 카운트
+  local body_lines_ok
+  body_lines_ok=$(sed -n "$((begin+1)),$((end-1))p" "$claude_md" \
+    | grep -vE '^\s*#|^\s*$' \
+    | grep -cE '^[A-Z_]+=[^=]+$')
+
+  [[ "$body_lines_ok" -lt 1 ]] && echo "preferences_corruption::CLAUDE.md — 유효 key=value 엔트리 없음"
+  return 0
+}
+
+# 통합 드리프트 리포트
+ehr_audit_report() {
+  local project_root="$1"
+  echo "=== EHR Cycle 드리프트 리포트 ==="
+  echo ""
+  local compound_drift
+  compound_drift=$(ehr_audit_compound_drift "$project_root")
+  [[ -n "$compound_drift" ]] && echo "[Compound 드리프트]" && echo "$compound_drift" && echo ""
+  local stale
+  stale=$(ehr_audit_stale_promotion "$project_root")
+  [[ -n "$stale" ]] && echo "[Stale Promotion]" && echo "$stale" && echo ""
+  local pref
+  pref=$(ehr_audit_preferences_parse "$project_root")
+  [[ -n "$pref" ]] && echo "[Preferences 파싱]" && echo "$pref" && echo ""
+  echo "=== 리포트 종료 ==="
+}

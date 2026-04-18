@@ -149,3 +149,58 @@ echo "$RESULT" | node -e "
   || fail "compute_drift reorder: 키 순서 차이로 false changed 발생 ($RESULT)"
 
 echo "ALL DRIFT COMPUTE TESTS PASSED (Task 7)"
+
+# ── EHR Cycle 드리프트 (v4) — smoke test ──
+TMP_P="$(mktemp -d)"
+mkdir -p "$TMP_P/.claude" "$TMP_P/reference" "$TMP_P/skills/domain-knowledge"
+cat > "$TMP_P/.claude/HARNESS.json" <<'EHR_JSON_EOF'
+{
+  "schema_version": 4,
+  "ehr_cycle": {
+    "compounds": [{"id":"ghost-id","level":"L2","domain":"code_map","files":["reference/CODE_MAP.md"]}],
+    "promoted": [{"id":"abc","backup":".ehr-bak/does-not-exist.bak"}]
+  }
+}
+EHR_JSON_EOF
+echo "# CODE_MAP" > "$TMP_P/reference/CODE_MAP.md"
+echo "# domain" > "$TMP_P/skills/domain-knowledge/SKILL.md"
+cat > "$TMP_P/CLAUDE.md" <<'CLAUDE_EOF'
+# CLAUDE
+
+<!-- EHR-PREFERENCES:BEGIN -->
+FILE_THRESHOLD=3
+SUGGEST_MODE=ask
+<!-- EHR-PREFERENCES:END -->
+CLAUDE_EOF
+
+RESULT=$(ehr_audit_compound_drift "$TMP_P")
+echo "$RESULT" | grep -q "orphan_compound:ghost-id" \
+  && pass "ehr_audit_compound_drift: orphan_compound 감지" \
+  || fail "ehr_audit_compound_drift: ghost-id 미검출 ($RESULT)"
+
+RESULT=$(ehr_audit_stale_promotion "$TMP_P")
+echo "$RESULT" | grep -q "stale_promotion::.ehr-bak/does-not-exist.bak" \
+  && pass "ehr_audit_stale_promotion: 미존재 백업 감지" \
+  || fail "ehr_audit_stale_promotion: 감지 실패 ($RESULT)"
+
+# 정상 preferences: 경고 없어야 함
+RESULT=$(ehr_audit_preferences_parse "$TMP_P")
+[[ -z "$RESULT" ]] \
+  && pass "ehr_audit_preferences_parse: 정상 블록은 조용히 통과" \
+  || fail "ehr_audit_preferences_parse: 정상인데 경고 발생 ($RESULT)"
+
+# 깨진 preferences 블록: corruption 감지
+cat > "$TMP_P/CLAUDE.md" <<'CORRUPT_EOF'
+# CLAUDE
+
+<!-- EHR-PREFERENCES:BEGIN -->
+(empty content, no key=value)
+<!-- EHR-PREFERENCES:END -->
+CORRUPT_EOF
+RESULT=$(ehr_audit_preferences_parse "$TMP_P")
+echo "$RESULT" | grep -q "preferences_corruption" \
+  && pass "ehr_audit_preferences_parse: 빈 블록은 corruption 감지" \
+  || fail "ehr_audit_preferences_parse: 빈 블록 감지 실패 ($RESULT)"
+
+rm -rf "$TMP_P"
+echo "ALL EHR CYCLE AUDIT TESTS PASSED"
