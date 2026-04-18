@@ -33,4 +33,14 @@ diff -u "$FX/case_compound_update.expected.md" "$TMP/target.md" >/dev/null \
   || fail "case_compound_update: diff mismatch
 $(diff -u "$FX/case_compound_update.expected.md" "$TMP/target.md")"
 
+# ── case_compound_preserve: 마커 외부 영역 보존 ──
+cp "$FX/case_compound_preserve.md" "$TMP/target.md"
+ehr_compound_upsert "$TMP/target.md" "EHR-COMPOUND" \
+  "exists" \
+  "- 갱신된 자동 기록"
+diff -u "$FX/case_compound_preserve.expected.md" "$TMP/target.md" >/dev/null \
+  && pass "case_compound_preserve: 외부 영역 보존" \
+  || fail "case_compound_preserve: diff mismatch
+$(diff -u "$FX/case_compound_preserve.expected.md" "$TMP/target.md")"
+
 echo "=== ehr-compound.test.sh: 모든 테스트 통과 ==="
