@@ -23,4 +23,14 @@ diff -u "$FX/case_compound_new.expected.md" "$TMP/target.md" >/dev/null \
   || fail "case_compound_new: diff mismatch
 $(diff -u "$FX/case_compound_new.expected.md" "$TMP/target.md")"
 
+# ── case_compound_update: 기존 id 블록 덮어쓰기 ──
+cp "$FX/case_compound_update.md" "$TMP/target.md"
+ehr_compound_upsert "$TMP/target.md" "EHR-COMPOUND" \
+  "upd-id" \
+  "- 갱신된 내용 (새 revision)"
+diff -u "$FX/case_compound_update.expected.md" "$TMP/target.md" >/dev/null \
+  && pass "case_compound_update: 기존 id 덮어쓰기" \
+  || fail "case_compound_update: diff mismatch
+$(diff -u "$FX/case_compound_update.expected.md" "$TMP/target.md")"
+
 echo "=== ehr-compound.test.sh: 모든 테스트 통과 ==="
