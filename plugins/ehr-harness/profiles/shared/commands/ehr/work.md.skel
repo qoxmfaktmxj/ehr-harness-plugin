@@ -3,5 +3,56 @@ description: superpowers:executing-plans 를 래핑해 EHR 스킬(design-guide/s
 ---
 
 <!-- EHR-COMMAND:BEGIN work -->
-(본문은 Phase 2 Task 13 에서 작성)
+# /ehr:work — 플랜 실행 (EHR 스킬 자동 라우팅)
+
+**프로파일:** {{PROFILE}}
+
+## 입력
+- 인자: `docs/ehr/plans/*.md` 경로
+
+## 수행 순서
+
+1. **플랜 읽기 & 검증:**
+   - 파일 존재 확인, `## Tasks` 섹션 파싱
+   - 태스크 리스트를 TodoWrite 로 등록
+
+2. **실행 엔진:**
+   - `superpowers:executing-plans` 스킬을 Skill 도구로 호출
+   - 태스크 순차 처리 + 체크포인트 검토
+
+3. **EHR 스킬 자동 라우팅** — 각 태스크 본문 스캔해 적절한 보조 도구 선택:
+   - **DB DDL 편집** → `design-guide` 스킬 참조 (명명 규약, 헤더 템플릿)
+   - **화면/JSP 편집** → `screen-builder` 에이전트 Task 호출
+   - **DB 조회 필요** → `db-query` 스킬 사용
+   - **프로시저 영향 질문** → `procedure-tracer` 에이전트 Task
+   - 태스크가 순수 코드 편집이면 라우팅 없이 직접 실행
+
+4. **git 감지 & 커밋 제안:**
+   - `git rev-parse --git-dir 2>/dev/null` 이 성공하면 태스크 완료마다 커밋 제안
+   - 실패하면 조용히 건너뜀 ("git 없는 환경")
+
+5. **완료 후 권장:**
+   - `/ehr:review <range>` — 머지 전 다중 관점 리뷰
+   - `/ehr:compound` — 새로 알게 된 사실/패턴을 하네스에 회수
+
+## 제약
+- **현재 브랜치에서 직접 편집**. worktree 생성 금지.
+- `.ehr-bak/`, `docs/ehr/*`, `EHR-COMPOUND`/`EHR-PROMOTED`/`EHR-PREFERENCES` 블록 수정 금지 (불변식).
+- 플랜에 명시되지 않은 파일은 편집 금지 (scope creep 방지).
+- superpowers:executing-plans 의 체크포인트를 임의로 건너뛰지 말 것.
+
+## 커밋 메시지 제안 포맷
+
+```
+<type>(<scope>): <태스크 제목>
+
+- <변경 요약>
+- 관련 플랜: docs/ehr/plans/YYYY-MM-DD-<topic>.md#<task-anchor>
+```
+
+## 출력
+
+- 변경 파일 목록 요약
+- 실패·건너뛴 태스크 사유
+- 다음 단계 안내: `/ehr:review` 또는 `/ehr:compound`
 <!-- EHR-COMMAND:END work -->
