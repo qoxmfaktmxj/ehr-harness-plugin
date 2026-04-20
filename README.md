@@ -1101,5 +1101,6 @@ CE(Compound Engineering, [EveryInc/compound-engineering-plugin](https://github.c
 
 | 버전 | 주요 변경 |
 |---|---|
+| **1.9.2** (2026-04-20) | 이슈 3건 수정 — ① Windows git-bash 호환성(`#2`): `.gitattributes` 로 fixture·쉘 eol=lf 강제 + SKILL.md 의 `/dev/stdin` node 호출 2곳을 env-var 패턴으로 통일(Windows 에서 `C:\dev\stdin` ENOENT 제거), ② polish(`#3`): dead `{{DB_VENDOR}}` 치환 선언 삭제 + shared/commands sed 의 dead `{{SESSION_VARS}}` 제거 + `ehr-compound.test.sh` corrupt 테스트에 stderr grep 2건 추가, ③ 문서 drift(`#1`): SKILL.md/HARNESS_SCHEMA.md 의 `schema_version == 3` 서술을 `∈ {3, 4}` 로 정정하고 v3 섹션에 이전 사양 표시 |
 | **1.9.1** (2026-04-18) | 코드 리뷰 후 Critical 3건 수정 — ① `ehr_compound_upsert` 의 마커 corruption 탐지 (불변식 1 보호), ② `audit.sh` 의 JSON 파싱을 awk → node 기반으로 교체 (pretty/compact 포맷 모두 안정), ③ `harness-state.sh` v4 스키마 bump + Step 4-I 에 실행 가능한 bash 블록 추가 + Step 4-G 이전으로 재배치 |
 | **1.9.0** (2026-04-18) | EHR Cycle 최초 도입 — `/ehr:*` 커맨드 5종, `db-impact-reviewer` 에이전트, 마커 스킴 4종, HARNESS.json v4, 4대 불변식 |
