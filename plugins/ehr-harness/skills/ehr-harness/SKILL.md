@@ -1563,7 +1563,8 @@ Write: .claude/skills/ehr-procedure-tracer/SKILL.md
 Read: $PLUGIN_ROOT/profiles/$PROFILE/skills/db-query/SKILL.md.skel
 치환:
   {{DB_CONNECTION}} → Step 2-J 탐지 결과 (또는 미발견 경고)
-  {{DB_VENDOR}} → "oracle" 또는 "tibero" (Step 2-J 감지 결과)
+# DB_VENDOR 는 SKILL.md 치환이 아닌 런타임 파일(.claude/skills/ehr-db-query/DB_VENDOR)로 전달.
+# skel 의 Java 예시 "{DB_VENDOR}" 는 독자가 자기 코드에 끼워 넣을 때 채워 쓰는 placeholder.
 Write: .claude/skills/ehr-db-query/SKILL.md
 ```
 
@@ -1927,12 +1928,13 @@ for cmd in ideate plan work review compound; do
   fi
 
   # 본문(EHR-COMMAND 마커 내부) 추출 → 치환 적용 → upsert
+  # SESSION_VARS 는 shared/commands/ehr/*.md.skel 5개 중 어디에도 토큰이 없으므로 여기서는 적용하지 않는다
+  # (db-impact-reviewer 에이전트 쪽 sed 에서만 살아있음).
   BODY=$(awk '/<!-- EHR-COMMAND:BEGIN /,/<!-- EHR-COMMAND:END /' "$SKEL" \
     | sed '1d;$d' \
     | sed "s|{{PROFILE}}|$SUBST_PROFILE|g; \
            s|{{AUTH_SERVICE}}|$SUBST_AUTH_SERVICE|g; \
            s|{{AUTH_TABLES}}|$SUBST_AUTH_TABLES|g; \
-           s|{{SESSION_VARS}}|$SUBST_SESSION_VARS|g; \
            s|{{COMMON_CONTROLLERS}}|$SUBST_COMMON_CONTROLLERS|g; \
            s|{{CRITICAL_PROCS}}|$SUBST_CRITICAL_PROCS|g; \
            s|{{MODULE_LIST}}|$SUBST_MODULE_LIST|g")

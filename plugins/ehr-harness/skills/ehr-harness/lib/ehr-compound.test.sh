@@ -69,9 +69,14 @@ echo "$RESULT" | grep -q '^b2$' \
 # case A: 2 BEGIN + 1 END (orphan begin) — user prose 가 있어야 보존 검증 가능
 cp "$FX/case_marker_corrupt_dup_begin.md" "$TMP/corrupt_a.md"
 BEFORE=$(cat "$TMP/corrupt_a.md")
-ehr_compound_upsert "$TMP/corrupt_a.md" "EHR-COMPOUND" "X" "- 갱신 시도" 2>/dev/null \
-  && fail "corrupt_dup_begin: upsert 가 abort 되어야 함 (0 리턴)" \
-  || pass "corrupt_dup_begin: upsert abort (non-zero 리턴)"
+ERR_A=$(ehr_compound_upsert "$TMP/corrupt_a.md" "EHR-COMPOUND" "X" "- 갱신 시도" 2>&1 >/dev/null)
+RC_A=$?
+[[ $RC_A -ne 0 ]] \
+  && pass "corrupt_dup_begin: upsert abort (non-zero 리턴)" \
+  || fail "corrupt_dup_begin: upsert 가 abort 되어야 함 (0 리턴)"
+echo "$ERR_A" | grep -q "마커 corruption 감지" \
+  && pass "corrupt_dup_begin: stderr 에 corruption 메시지 포함" \
+  || fail "corrupt_dup_begin: corruption 메시지 누락 ($ERR_A)"
 AFTER=$(cat "$TMP/corrupt_a.md")
 [[ "$BEFORE" == "$AFTER" ]] \
   && pass "corrupt_dup_begin: 파일 내용 불변 (외부 prose 보존)" \
@@ -80,9 +85,14 @@ AFTER=$(cat "$TMP/corrupt_a.md")
 # case B: 1 BEGIN + 0 END (missing end)
 cp "$FX/case_marker_corrupt_missing_end.md" "$TMP/corrupt_b.md"
 BEFORE=$(cat "$TMP/corrupt_b.md")
-ehr_compound_upsert "$TMP/corrupt_b.md" "EHR-COMPOUND" "Y" "- 갱신 시도" 2>/dev/null \
-  && fail "corrupt_missing_end: upsert 가 abort 되어야 함" \
-  || pass "corrupt_missing_end: upsert abort"
+ERR_B=$(ehr_compound_upsert "$TMP/corrupt_b.md" "EHR-COMPOUND" "Y" "- 갱신 시도" 2>&1 >/dev/null)
+RC_B=$?
+[[ $RC_B -ne 0 ]] \
+  && pass "corrupt_missing_end: upsert abort" \
+  || fail "corrupt_missing_end: upsert 가 abort 되어야 함"
+echo "$ERR_B" | grep -q "마커 corruption 감지" \
+  && pass "corrupt_missing_end: stderr 에 corruption 메시지 포함" \
+  || fail "corrupt_missing_end: corruption 메시지 누락 ($ERR_B)"
 AFTER=$(cat "$TMP/corrupt_b.md")
 [[ "$BEFORE" == "$AFTER" ]] \
   && pass "corrupt_missing_end: 파일 내용 불변" \
