@@ -775,8 +775,8 @@ source "$PLUGIN_ROOT/skills/ehr-harness/lib/detect.sh"
 DDL_AUTH_JSON=$(detect_ddl_folder "$(pwd)")
 
 # DDL 폴더 enabled 여부에 따라 b3_strategy 결정
-DDL_ENABLED=$(echo "$DDL_AUTH_JSON" | node -e "
-  const m=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+DDL_ENABLED=$(DDL="$DDL_AUTH_JSON" node -e "
+  const m=JSON.parse(process.env.DDL);
   process.stdout.write(m.enabled ? 'yes' : 'no');
 ")
 
@@ -809,8 +809,8 @@ DB_VERIFICATION_JSON=$(DDL="$DDL_AUTH_JSON" DBA="$DB_ACCESS_STATE" B3S="$B3_STRA
 ")
 
 echo "=== DDL 폴더 감별 결과 ==="
-echo "$DDL_AUTH_JSON" | node -e "
-  const m=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+DDL="$DDL_AUTH_JSON" node -e "
+  const m=JSON.parse(process.env.DDL);
   console.log('enabled:        ' + m.enabled);
   console.log('table_path:     ' + (m.table_path||'(없음)'));
   console.log('procedure_path: ' + (m.procedure_path||'(없음)'));

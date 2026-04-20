@@ -1,0 +1,10 @@
+# 테스트 fixture 는 OS 무관하게 LF 고정.
+# ehr-compound.sh 의 printf '\n' 출력과 라인엔딩이 어긋나면
+# Windows git-bash(core.autocrlf=true) 환경에서 diff 가 false-fail 난다.
+plugins/ehr-harness/skills/ehr-harness/lib/fixtures/** text eol=lf
+
+# 쉘 스크립트는 OS 무관 LF (bash 가 CR 을 명령어 일부로 해석하지 않도록)
+*.sh text eol=lf
+
+# 프로젝트 전반 기본: Git 자동 감지에 맡김
+* text=auto
