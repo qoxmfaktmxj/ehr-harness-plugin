@@ -3,7 +3,9 @@
 `.claude/HARNESS.json` 은 ehr-harness 메타 스킬이 생성한 하네스의 상태 매니페스트다.
 업데이트 모드가 이 파일을 읽고 비교해 변경분을 산출하고, audit 모드는 `analysis` 필드를 baseline 으로 현재 프로젝트와의 drift 를 검사한다.
 
-## Schema (version 3)
+## Schema (version 3) *(이전 사양 — 아래 "Schema (version 4) — EHR Cycle 도입" 섹션 참조)*
+
+> 이 섹션은 v3 구조를 그대로 보존한다. 현재 플러그인(v1.9.0+)은 **v4 를 기본으로 기록**하고 v3 은 stamped 집합에 포함해 마이그레이션 유예 기간을 제공한다. 신규 항목/변경점은 v4 섹션을 볼 것.
 
 ```json
 {
@@ -135,7 +137,7 @@
 
 | 필드 | 설명 |
 |------|------|
-| `schema_version` | 매니페스트 자체 스키마 버전. **v3으로 bump됨**. v1/v2 매니페스트는 legacy 처리. |
+| `schema_version` | 매니페스트 자체 스키마 버전. **현재 v4** (EHR Cycle 도입). v3 도 stamped 로 허용(마이그레이션 유예). v1/v2 는 legacy 처리. |
 | `plugin_name` | 항상 `"ehr-harness"`. |
 | `plugin_version` | 생성 당시 plugin.json 의 version. 사람이 읽기 쉬운 정보 + 빠른 비교용. |
 | `profile` | `"ehr4"` 또는 `"ehr5"`. 프로파일이 바뀌면 거의 모든 파일이 충돌하므로 별도 처리. |
@@ -162,16 +164,19 @@
 | 값 | 조건 | 동작 |
 |----|------|------|
 | `fresh` | 매니페스트 없음 + 하네스 흔적 없음 | 기존 흐름(전체 생성) |
-| `legacy` | 매니페스트 없음 + 하네스 흔적 있음 (AGENTS.md 등) 또는 schema_version ≠ 3 | adopt vs 전체 재생성 vs 취소 |
-| `stamped` | 매니페스트 존재 + schema_version == 3 | 업데이트 모드 (3-bucket diff, 플러그인 업데이트) |
-| `audit` | 매니페스트 존재 + schema_version == 3 + 사용자가 audit 키워드로 트리거 | 저장된 `analysis` vs 현재 재실행한 `analysis` 를 diff → 드리프트 검사 + 반자동 반영 (신규) |
+| `legacy` | 매니페스트 없음 + 하네스 흔적 있음 (AGENTS.md 등) 또는 schema_version ∉ {3, 4} | adopt vs 전체 재생성 vs 취소 |
+| `stamped` | 매니페스트 존재 + schema_version ∈ {3, 4} | 업데이트 모드 (3-bucket diff, 플러그인 업데이트) |
+| `audit` | 매니페스트 존재 + schema_version ∈ {3, 4} + 사용자가 audit 키워드로 트리거 | 저장된 `analysis` vs 현재 재실행한 `analysis` 를 diff → 드리프트 검사 + 반자동 반영 (신규) |
 
-## 마이그레이션 (v1/v2 → v3)
+> 허용 집합(`{3, 4}`)은 [harness-state.sh](./harness-state.sh) 의 `HS_SCHEMA_VERSION_STAMPED` 가 단일 출처. v3 사용자가 v1.9.0+ 플러그인으로 업그레이드했을 때 즉시 legacy 로 재분류되지 않도록 공존 허용.
 
-v1/v2 매니페스트는 `hs_is_legacy` 가 `legacy` 로 분류하여 사용자에게 adopt 여부를 묻는다. adopt 선택 시 Step 4-G 가 새 감별 결과 + analysis 스냅샷과 함께 v3 매니페스트를 기록한다.
+## 마이그레이션 (v1/v2 → 현재)
 
-- v1 → v3: 완전 재생성 (analysis 최초 기록). 이전 stamped 상태가 없으므로 audit 진입 시 baseline 모드로 동작.
-- v2 → v3: auth_model/db_verification/ddl_authoring 유지 + analysis 추가. audit 가 바로 의미있는 drift 를 반환하려면 최소 1 회의 재생성이 필요하다 (analysis 없이는 비교 baseline 이 없음).
+v1/v2 매니페스트는 `hs_is_legacy` 가 `legacy` 로 분류하여 사용자에게 adopt 여부를 묻는다. adopt 선택 시 Step 4-G 가 새 감별 결과 + analysis 스냅샷과 함께 **현재 버전(v4)** 매니페스트를 기록한다.
+
+- v1 → v4: 완전 재생성 (analysis 최초 기록). 이전 stamped 상태가 없으므로 audit 진입 시 baseline 모드로 동작.
+- v2 → v4: auth_model/db_verification/ddl_authoring 유지 + analysis 추가. audit 가 바로 의미있는 drift 를 반환하려면 최소 1 회의 재생성이 필요하다 (analysis 없이는 비교 baseline 이 없음).
+- v3 → v4: **자동 유예** — v3 매니페스트는 stamped 로 계속 인식되고 다음 하네스 업데이트 시 `ehr_cycle` 섹션 + 신규 `outputs[]` 엔트리를 추가하며 `schema_version` 이 4 로 갱신된다. 사용자 adopt 플로우 없이 진행.
 
 ## Schema (version 4) — EHR Cycle 도입
 
