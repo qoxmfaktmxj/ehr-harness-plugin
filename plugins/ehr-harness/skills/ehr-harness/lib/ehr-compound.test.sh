@@ -13,35 +13,42 @@ trap 'rm -rf "$TMP"' EXIT
 fail() { echo "FAIL: $1"; exit 1; }
 pass() { echo "PASS: $1"; }
 
+# Windows git-bash 에서 fixture 가 CRLF 로 체크아웃되는 drift 가 다시 발생해도
+# (예: .gitattributes 가 부분 적용된 환경) 테스트가 false-fail 나지 않도록
+# 양쪽의 CR 바이트를 제거한 뒤 비교한다. 정상(LF only) 환경에서는 tr 가 no-op.
+_diff_lf() {
+  diff -u <(tr -d '\r' < "$1") <(tr -d '\r' < "$2")
+}
+
 # ── case_compound_new: 섹션 말미에 신규 블록 추가 ──
 cp "$FX/case_compound_new.md" "$TMP/target.md"
 ehr_compound_upsert "$TMP/target.md" "EHR-COMPOUND" \
   "2026-04-18-paycalc-trigger" \
   "- \`PayCalcController.calculate()\` → \`P_CPN_CAL_PAY_MAIN\` 호출"
-diff -u "$FX/case_compound_new.expected.md" "$TMP/target.md" >/dev/null \
+_diff_lf "$FX/case_compound_new.expected.md" "$TMP/target.md" >/dev/null \
   && pass "case_compound_new: 신규 블록 삽입" \
   || fail "case_compound_new: diff mismatch
-$(diff -u "$FX/case_compound_new.expected.md" "$TMP/target.md")"
+$(_diff_lf "$FX/case_compound_new.expected.md" "$TMP/target.md")"
 
 # ── case_compound_update: 기존 id 블록 덮어쓰기 ──
 cp "$FX/case_compound_update.md" "$TMP/target.md"
 ehr_compound_upsert "$TMP/target.md" "EHR-COMPOUND" \
   "upd-id" \
   "- 갱신된 내용 (새 revision)"
-diff -u "$FX/case_compound_update.expected.md" "$TMP/target.md" >/dev/null \
+_diff_lf "$FX/case_compound_update.expected.md" "$TMP/target.md" >/dev/null \
   && pass "case_compound_update: 기존 id 덮어쓰기" \
   || fail "case_compound_update: diff mismatch
-$(diff -u "$FX/case_compound_update.expected.md" "$TMP/target.md")"
+$(_diff_lf "$FX/case_compound_update.expected.md" "$TMP/target.md")"
 
 # ── case_compound_preserve: 마커 외부 영역 보존 ──
 cp "$FX/case_compound_preserve.md" "$TMP/target.md"
 ehr_compound_upsert "$TMP/target.md" "EHR-COMPOUND" \
   "exists" \
   "- 갱신된 자동 기록"
-diff -u "$FX/case_compound_preserve.expected.md" "$TMP/target.md" >/dev/null \
+_diff_lf "$FX/case_compound_preserve.expected.md" "$TMP/target.md" >/dev/null \
   && pass "case_compound_preserve: 외부 영역 보존" \
   || fail "case_compound_preserve: diff mismatch
-$(diff -u "$FX/case_compound_preserve.expected.md" "$TMP/target.md")"
+$(_diff_lf "$FX/case_compound_preserve.expected.md" "$TMP/target.md")"
 
 # ── ehr_compound_remove: 블록 제거 ──
 cp "$FX/case_compound_preserve.md" "$TMP/target.md"
