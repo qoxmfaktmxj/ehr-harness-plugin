@@ -72,6 +72,20 @@ _normalize_conn_for_cli() {
   s=$(printf '%s' "$s" | sed -E 's#^jdbc:[a-z]+:thin:##')
   # host:port:SID → host:port/SID (Oracle 구표기 호환)
   s=$(printf '%s' "$s" | sed -E 's#@([^:/@]+):([0-9]+):([A-Za-z0-9_.]+)$#@\1:\2/\3#')
+
+  # 미치환 환경변수 placeholder 감지 — 설정 파일의 `${DB_HOST}` 등이 치환되지 않은
+  # 채 DB_CONNECTION 으로 흘러들어오는 케이스. 정상 커넥션에서는 no-op.
+  # Oracle 은 식별자에 '$' 를 허용하므로(SYS$UMF, SCOTT$SCHEMA, pwd 내 '$' 등)
+  # 중괄호 없는 `$VAR` 은 오탐의 원인이 된다. 실무상 설정 치환 누락의 대부분은
+  # `${VAR}` 형태이므로 중괄호 표기만 placeholder 로 판정한다.
+  # stdout 은 건드리지 않고 stderr 에 한 줄만 남겨 디버깅 힌트 제공.
+  local tokens
+  tokens=$(printf '%s' "$s" | grep -oE '\$\{[A-Za-z_][A-Za-z0-9_]*\}' 2>/dev/null \
+           | sort -u | head -3 | tr '\n' ' ')
+  if [ -n "$tokens" ]; then
+    echo "WARN: _normalize_conn_for_cli: unresolved placeholder(s) in connection string: ${tokens%% } — check .env / config substitution" >&2
+  fi
+
   printf '%s\n' "$s"
 }
 

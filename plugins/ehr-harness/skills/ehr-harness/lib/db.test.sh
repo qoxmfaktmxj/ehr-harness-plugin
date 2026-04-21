@@ -54,6 +54,38 @@ case "$RESULT" in
   *) pass "redact: slash pw 일부 잔존 없음" ;;
 esac
 
+# ── _normalize_conn_for_cli: 정상 입력은 stderr silent (P2-1 정상 경로) ──
+STDERR=$(_normalize_conn_for_cli "scott/tiger@localhost:1521:ORCL" 2>&1 >/dev/null)
+[ -z "$STDERR" ] \
+  && pass "normalize: placeholder 없으면 stderr silent" \
+  || fail "normalize: 정상 경로에서 stderr 발생 ($STDERR)"
+
+# ── _normalize_conn_for_cli: Oracle 식별자·password 안의 '$' 는 false positive 안 나야 함 ──
+# (SCOTT$SCHEMA, SYS$UMF 같은 시스템/레거시 유저, password 에 '$' 포함 등)
+STDERR=$(_normalize_conn_for_cli 'SCOTT$SCHEMA/pass@host:1521:ORCL' 2>&1 >/dev/null)
+[ -z "$STDERR" ] \
+  && pass "normalize: user '\$' 포함 식별자 false positive 없음" \
+  || fail "normalize: user '\$' 식별자에서 false positive WARN ($STDERR)"
+STDERR=$(_normalize_conn_for_cli 'scott/pa$w0rd@host:1521:ORCL' 2>&1 >/dev/null)
+[ -z "$STDERR" ] \
+  && pass "normalize: password 내 '\$' false positive 없음" \
+  || fail "normalize: password '\$' 에서 false positive WARN ($STDERR)"
+
+# ── _normalize_conn_for_cli: ${VAR} 미치환 placeholder → stderr WARN + 토큰 포함 ──
+STDERR=$(_normalize_conn_for_cli 'scott/tiger@${DB_HOST}:1521:ORCL' 2>&1 >/dev/null)
+case "$STDERR" in
+  *WARN*unresolved*placeholder*'${DB_HOST}'*) pass "normalize: \${VAR} placeholder → WARN + 토큰 포함" ;;
+  *) fail "normalize: \${VAR} WARN/토큰 누락 ($STDERR)" ;;
+esac
+
+# ── 여러 placeholder 가 있으면 모두 노출 (최대 3개) ──
+STDERR=$(_normalize_conn_for_cli 'scott/tiger@${DB_HOST}:${DB_PORT}:${DB_SID}' 2>&1 >/dev/null)
+case "$STDERR" in
+  *'${DB_HOST}'*'${DB_PORT}'*'${DB_SID}'*) pass "normalize: 다중 placeholder 모두 노출" ;;
+  *'${DB_SID}'*'${DB_PORT}'*'${DB_HOST}'*) pass "normalize: 다중 placeholder 모두 노출" ;;
+  *) fail "normalize: 다중 placeholder 일부 누락 ($STDERR)" ;;
+esac
+
 # ── test_db_connection: 드라이버 없으면 즉시 실패 + password 미노출 ──
 # sqlplus/tbsql 존재 여부와 무관하게 "비어있는 입력"은 반드시 실패
 if test_db_connection "" 2>/dev/null; then
