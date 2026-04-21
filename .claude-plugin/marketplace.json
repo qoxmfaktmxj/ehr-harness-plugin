@@ -12,7 +12,7 @@
       "name": "ehr-harness",
       "source": "./plugins/ehr-harness",
       "description": "EHR4/5 프로젝트용 AI 코딩 하네스 자동 생성기. '하네스 만들어줘' 한 마디로 프로젝트를 분석하고 맞춤형 하네스를 생성한다.",
-      "version": "1.9.1",
+      "version": "1.9.3",
       "keywords": ["ehr", "harness", "hr", "legacy", "oracle"]
     }
   ]
