@@ -515,6 +515,10 @@ done
 #### 2-J-1. 접속 정보 자동 탐지
 
 ```bash
+# DB helper 로드 — test_db_connection / detect_dump_format / redact_connection_string.
+# 2-J-2(direct) 뿐 아니라 2-J-4 [2](DUMP) 분기에서도 필요하므로 2-J 상단에서 한 번만 source 한다.
+source "$PLUGIN_ROOT/skills/ehr-harness/lib/db.sh"
+
 # EHR5: application.properties / application.yml
 grep -r "spring.datasource" --include="*.properties" --include="*.yml" . 2>/dev/null
 
@@ -541,9 +545,11 @@ context.xml의 `url` 속성에서 `log4jdbc:` 를 제거한 순수 JDBC URL 기�
 **Case A: 접속 정보 발견 → 실제 연결 시도**
 
 ```bash
+# db.sh 는 2-J-1 상단에서 이미 source 된 상태.
 if [ -n "$DB_CONNECTION" ]; then
-  # sqlplus 또는 jdbc test로 connection 시도
-  # (드라이버 jar가 있으면 javac로 간단한 test 클래스 컴파일 후 실행)
+  # sqlplus(Oracle) 또는 tbsql(Tibero) 로 SELECT 'EHRDB_OK_SENTINEL' FROM DUAL 시도.
+  # /nolog + stdin CONNECT 방식이므로 argv 에 평문 password 가 노출되지 않는다.
+  # 드라이버가 PATH 에 없으면 자동 fallback 없이 명확한 에러를 리턴한다.
   CONNECT_RESULT=$(test_db_connection "$DB_CONNECTION" 2>&1)
 
   if [ $? -eq 0 ]; then
@@ -741,7 +747,9 @@ else
     ")
 
     # index.json 파싱 → 카테고리 트리 + title→JS 매핑
+    # 중간 실패 / 조기 종료 시 leftover 방지를 위해 trap 으로 cleanup 등록.
     SB_TITLES_TMP=$(mktemp)
+    trap 'rm -f "$SB_TITLES_TMP"' EXIT
     node -e "
       const idx = JSON.parse(require('fs').readFileSync('$SB_PATH/index.json','utf8'));
       const titles = {};
@@ -1010,6 +1018,7 @@ $1|$2|$3|$4"
   add "profiles/shared/hooks/db-read-only.sh" "$PLUGIN_ROOT/profiles/shared/hooks/db-read-only.sh" ".claude/hooks/db-read-only.sh" ".claude/hooks/db-read-only.sh"
   add "profiles/shared/hooks/vcs-no-commit.sh" "$PLUGIN_ROOT/profiles/shared/hooks/vcs-no-commit.sh" ".claude/hooks/vcs-no-commit.sh" ".claude/hooks/vcs-no-commit.sh"
   add "profiles/shared/.codex/config.toml"    "$PLUGIN_ROOT/profiles/shared/.codex/config.toml"    ".codex/config.toml"           ".codex/config.toml"
+  add "profiles/shared/.gitignore"            "$PLUGIN_ROOT/profiles/shared/.gitignore"            ".gitignore"                   ".gitignore"
 
   # 문서 (skel 기반)
   add "profiles/$PROFILE/skeleton/AGENTS.md.skel" "$PLUGIN_ROOT/profiles/$PROFILE/skeleton/AGENTS.md.skel" "AGENTS.md" "AGENTS.md"
@@ -1034,7 +1043,29 @@ $1|$2|$3|$4"
         "$PLUGIN_ROOT/profiles/$PROFILE/skills/design-guide/SKILL.md.skel" \
         ".claude/skills/ehr-design-guide/SKILL.md" \
         ".claude/skills/ehr-design-guide/SKILL.md"
+    # 런타임 생성물(INDEX/MANIFEST)은 sabs 를 "" 로 두어 outputs 에만 sha 가 기록되도록 한다.
+    add "generated:ehr-design-guide/INDEX.md"    "" \
+        ".claude/skills/ehr-design-guide/references/INDEX.md" \
+        ".claude/skills/ehr-design-guide/references/INDEX.md"
+    add "generated:ehr-design-guide/MANIFEST.json" "" \
+        ".claude/skills/ehr-design-guide/MANIFEST.json" \
+        ".claude/skills/ehr-design-guide/MANIFEST.json"
   fi
+
+  # Codex/Gemini 호환 — .agents/skills 복사본 + GEMINI.md 조립본
+  # (source 는 .claude/skills/* 자체이므로 중복 sha 기록을 피하기 위해
+  #  sabs 를 "" 로 두고 outputs-only 로 등록한다)
+  for s in domain-knowledge screen-builder codebase-navigator procedure-tracer db-query impact-analyzer; do
+    add "generated:.agents/skills/ehr-$s/SKILL.md" "" \
+        ".agents/skills/ehr-$s/SKILL.md" \
+        ".agents/skills/ehr-$s/SKILL.md"
+  done
+  if [ "$DESIGN_GUIDE" = "true" ]; then
+    add "generated:.agents/skills/ehr-design-guide/SKILL.md" "" \
+        ".agents/skills/ehr-design-guide/SKILL.md" \
+        ".agents/skills/ehr-design-guide/SKILL.md"
+  fi
+  add "generated:GEMINI.md" "" "GEMINI.md" "GEMINI.md"
 
   # 에이전트
   add "profiles/$PROFILE/agents/screen-builder.md"    "$PLUGIN_ROOT/profiles/$PROFILE/agents/screen-builder.md"    ".claude/agents/screen-builder.md"    ".claude/agents/screen-builder.md"
@@ -1063,6 +1094,10 @@ fi
 
 ```bash
 if [ "$HARNESS_MODE" = "stamped" ]; then
+  # conflict 결정 테이블. associative array 이므로 반드시 먼저 선언한다.
+  # (bash 4+ 전제. macOS 기본 bash 3.x 에서는 `brew install bash` 후 /usr/local/bin/bash 사용 권장.)
+  declare -A CONFLICT_DECISION=()
+
   UNCHANGED=""
   SAFE_UPDATES=""
   USER_ONLY=""
@@ -1071,6 +1106,13 @@ if [ "$HARNESS_MODE" = "stamped" ]; then
 
   while IFS='|' read -r skey sabs okey oabs; do
     [ -z "$skey" ] && continue
+    # "generated:" 프리픽스 엔트리는 매 빌드 재조립되는 런타임 산출물
+    # (GEMINI.md, .agents/skills/*, design-guide INDEX/MANIFEST 등).
+    # source 가 없어 hs_classify_file 이 src_changed=0 로만 판정하므로 user 가
+    # 수정했을 때 user-only 로 오분류되어 stale 복사본이 보존되는 문제를 막기 위해
+    # bucket 분류에서 제외한다. 이들은 Step 3 본체에서 무조건 재생성되고,
+    # Step 4-G 의 OUTPUTS_JSON 집계 루프(별도)는 그대로 sha 를 기록한다.
+    case "$skey" in generated:*) continue ;; esac
     bucket=$(hs_classify_file "$MANIFEST" "$skey" "$sabs" "$okey" "$oabs")
     case "$bucket" in
       unchanged)   UNCHANGED="$UNCHANGED $okey" ;;
@@ -1684,26 +1726,44 @@ Write: .claude/skills/ehr-design-guide/references/INDEX.md
 
 #### 3-F-3. MANIFEST.json 생성
 
+Step 2-K 에서 확정된 `$SB_PATH` / `$SB_GENERATED_AT` / `$SB_VERSION` 과 `$SB_TITLES_TMP`
+(title→JS 매핑 JSON 파일) 를 환경변수로 넘겨 manifest 를 쓴다. 셸 변수를 JS 리터럴에
+직접 보간하지 않는다 — 문자열이 따옴표 없이 들어가거나 placeholder 가 그대로 남는 것을 방지.
+
 ```bash
-node -e "
-  const manifest = {
-    schema_version: 1,
-    storybook_path: '$SB_PATH',
-    generated_at: $SB_GENERATED_AT,
-    storybook_version: '$SB_VERSION',
-    extracted_at: new Date().toISOString(),
-    pre_extracted: [
-      '00-Introduction', '01-Naming-Rules', '02-Legacy-JSP-Migration',
-      '03-Quick-Reference', 'Button', 'Chip', 'FormSelect',
-      'FormSelect2', 'Table', 'Text'
-    ],
-    title_to_js: <TITLE_TO_JS 매핑 객체>
-  };
-  require('fs').writeFileSync(
-    '.claude/skills/ehr-design-guide/MANIFEST.json',
-    JSON.stringify(manifest, null, 2)
-  );
-"
+SB_PATH="$SB_PATH" \
+SB_GENERATED_AT="$SB_GENERATED_AT" \
+SB_VERSION="$SB_VERSION" \
+SB_TITLES_FILE="$SB_TITLES_TMP" \
+node - <<'NODE'
+const fs = require('fs');
+
+const readTitles = (p) => {
+  if (!p) return {};
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); }
+  catch (e) { return {}; }
+};
+
+const manifest = {
+  schema_version: 1,
+  storybook_path: process.env.SB_PATH || null,
+  generated_at: process.env.SB_GENERATED_AT || null,
+  storybook_version: process.env.SB_VERSION || null,
+  extracted_at: new Date().toISOString(),
+  pre_extracted: [
+    '00-Introduction', '01-Naming-Rules', '02-Legacy-JSP-Migration',
+    '03-Quick-Reference', 'Button', 'Chip', 'FormSelect',
+    'FormSelect2', 'Table', 'Text'
+  ],
+  title_to_js: readTitles(process.env.SB_TITLES_FILE),
+};
+
+fs.mkdirSync('.claude/skills/ehr-design-guide', { recursive: true });
+fs.writeFileSync(
+  '.claude/skills/ehr-design-guide/MANIFEST.json',
+  JSON.stringify(manifest, null, 2)
+);
+NODE
 ```
 
 #### 3-F-4. 핵심 10개 사전 추출 (Claude inline)
