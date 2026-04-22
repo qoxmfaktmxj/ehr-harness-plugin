@@ -39,7 +39,7 @@ Spring Boot 2.7.18 + MyBatis 3 + Java 8 + JSP + jQuery + IBSheet7 + Oracle.
 
 - `ehr-screen-builder`: 화면 생성/주요 수정 시 스폰. 기존 화면을 복제 베이스로 자율 실행. `ddl_authoring.enabled` 시 DDL 파일 자동 생성 (사용자 확인 프롬프트 포함).
 - `ehr-procedure-tracer`: 프로시저 체인 분석 시 스폰. 재귀 추적하여 보고서 반환.
-- `release-reviewer`: 릴리즈 전 회귀 검증 시 스폰. B1~B10 경계 매트릭스 + 5개 회귀 패턴 + 5개 치명 위험을 조건부로 검증 (AGENTS.md 의 `auth_model` / `db_verification` 참조). PASS / FIX / REDO / HOLD / CHECK 판정. 읽기 전용.
+- `release-reviewer`: 릴리즈 전 회귀 검증 시 스폰. B1~B11 경계 매트릭스 + 5개 회귀 패턴 + 5개 치명 위험을 조건부로 검증 (AGENTS.md 의 `auth_model` / `db_verification` 참조). PASS / FIX / REDO / HOLD / CHECK 판정. 읽기 전용.
 - 에이전트는 각자의 스킬(`.claude/skills/`)을 참조하여 작업한다.
 
 ## 4. DB 접근 규칙

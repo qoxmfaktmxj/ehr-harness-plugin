@@ -156,6 +156,11 @@ END {FUNC_NAME};
 
 매퍼 XML의 SELECT/MERGE/DELETE 쿼리를 신규 테이블 구조에 맞게 수정
 Anyframe Velocity 문법 사용: $rm.field, #if, #foreach, :bind, $velocityHasNext
+
+**특수문자 철칙 — 부등호·`&` 는 CDATA 로만 처리:**
+  - 기존 쿼리가 `<statement><![CDATA[...]]></statement>` 안에 있으면 raw `<`/`<=`/`>=`/`<>` 그대로 유지. `&lt;` 로 재이스케이프 금지.
+  - 부등호가 필요한데 주변 문맥에 CDATA 가 없으면 해당 SQL 구문을 CDATA 섹션으로 감싼다 (엔티티 이스케이프 대체 금지 — Anyframe 관행).
+  - CDATA 밖 raw `<` 는 매퍼 전체 로딩 실패를 유발 — 절대 허용하지 않는다.
 ```
 
 ### Step 4: 셀프 체크
@@ -170,6 +175,7 @@ Anyframe Velocity 문법 사용: $rm.field, #if, #foreach, :bind, $velocityHasNe
 □ 법칙 B → $query 존재 확인 (MISSING = HOLD)
 □ 법칙 D → CALLABLE + OUT 파라미터 확인
 □ 권한이 필요한 화면 → $query INNER JOIN 패턴 확인
+□ 부등호(`<`, `<=`, `>=`, `<>`)·`&` 는 CDATA 안에만 존재 (엔티티 이스케이프 0건)
 ```
 
 ## 핵심 코드 패턴

@@ -110,6 +110,7 @@ reviewer 에이전트의 B3 (컬럼 ↔ DDL) 검증은 `b3_strategy` 에 따라 
 - **MERGE 패턴**: `<foreach item="rm" collection="mergeRows" separator=" UNION ALL ">` + `FROM DUAL`
 - **DELETE 패턴**: `(NULL, NULL)` 센티넬 + `<foreach item="rm" collection="deleteRows">`
 - **프로시저 OUT**: `#{sqlCode,mode=OUT,jdbcType=VARCHAR}`, `#{sqlErrm,mode=OUT,jdbcType=VARCHAR}`
+- **매퍼 XML 특수문자**: Oracle 비교 연산자(`<`, `<=`, `>=`, `<>`)·`&` 는 **CDATA 섹션** 안에 둔다. `&lt;`/`&gt;`/`&amp;` 엔티티 이스케이프 금지 (팀 관행 — SQL 가독성 유지). 원본이 이미 `<![CDATA[...]]>` 안이면 raw `<` 그대로 유지하고 엔티티로 재이스케이프하지 않는다. CDATA 밖 raw `<` 삽입은 XML 파싱 실패를 유발하므로 금지.
 
 ## DB 접근 규칙
 

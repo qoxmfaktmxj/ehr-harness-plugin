@@ -558,3 +558,36 @@ Mapper XML에서 3가지 주입 패턴:
 - [ ] MERGE의 첫 행: `SELECT NULL ... FROM DUAL`
 - [ ] DELETE의 첫 행: `(NULL, NULL)` 센티넬
 - [ ] CHKDATE = SYSDATE, CHKID = #{ssnSabun} 감사 컬럼
+- [ ] 부등호(`<`, `<=`, `>=`, `<>`)·`&` 는 `<![CDATA[...]]>` 안에 존재 (엔티티 이스케이프 금지, 기존 CDATA 내부 raw `<` 보존)
+
+---
+
+## 매퍼 XML 수정 시 특수문자 원칙 (Iron Rule)
+
+기존 `*-sql-query.xml` 을 **수정**할 때 Oracle 비교 연산자(`<`, `<=`, `>=`, `<>`)·`&` 처리:
+
+1. 원본이 이미 `<![CDATA[...]]>` 안이면 **raw `<` 그대로 유지** — 절대 `&lt;` 로 재이스케이프하지 않는다.
+2. 원본이 CDATA 밖이고 `&lt;` 엔티티를 쓰는 경우 **그대로 `&lt;` 유지** (기존 스타일 보존).
+3. 신규로 부등호가 필요하고 주변 문맥에 CDATA 가 없다면 **해당 SQL 구문을 CDATA 로 감싼다** — 엔티티 이스케이프보다 CDATA 가 EHR 관행.
+4. 금지: ① CDATA 없이 raw `<` 삽입(XML 파싱 실패), ② CDATA 안인데 `&lt;` 로 재이스케이프(이중 변환).
+
+```xml
+<!-- 권장 -->
+<select id="list" resultType="cMap">
+  <![CDATA[
+  SELECT * FROM T_HRM WHERE start_dt < SYSDATE
+  ]]>
+</select>
+
+<!-- 금지: CDATA 없이 raw < -->
+<select id="list" resultType="cMap">
+  SELECT * FROM T_HRM WHERE start_dt < SYSDATE
+</select>
+
+<!-- 금지: CDATA 안인데 엔티티로 재이스케이프 -->
+<select id="list" resultType="cMap">
+  <![CDATA[
+  SELECT * FROM T_HRM WHERE start_dt &lt; SYSDATE
+  ]]>
+</select>
+```

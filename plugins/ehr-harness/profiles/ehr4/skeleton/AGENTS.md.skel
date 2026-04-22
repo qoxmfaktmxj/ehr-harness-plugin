@@ -98,6 +98,7 @@ reviewer 에이전트의 B3 (컬럼 ↔ DDL) 검증은 `b3_strategy` 에 따라 
 - 매퍼 파일명: `*-mapping-query.xml`
 - Velocity 바인딩: `:key` (안전 바인딩), `$var` (문자열 치환), `$query`/`${query}` (권한 주입)
 - 결과값 참조: `$result.variable` (Velocity 확장)
+- **매퍼 XML 특수문자**: Oracle 비교 연산자(`<`, `<=`, `>=`, `<>`)·`&` 는 **CDATA 섹션** 안에 둔다. `&lt;`/`&gt;`/`&amp;` 엔티티 이스케이프 금지 (팀 관행 — SQL 가독성 유지). 원본이 이미 `<![CDATA[...]]>` 안이면 raw `<` 그대로 유지하고 엔티티로 재이스케이프하지 않는다. CDATA 밖 raw `<` 삽입은 `<statement>` 파싱 실패를 유발하므로 금지.
 
 ### DAO 메서드 (typo 유지)
 `getList` · `getMap` · `getOne` · `create` · `update` · `delete` · `excute`

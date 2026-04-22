@@ -1630,7 +1630,7 @@ Read: $PLUGIN_ROOT/profiles/$PROFILE/agents/procedure-tracer.md
 Write: .claude/agents/procedure-tracer.md
 
 # release-reviewer — 프로파일별 독립 파일 사용 ($PROFILE 에 해당하는 파일 읽기)
-# EHR4: B1~B6 매트릭스 / EHR5: B1~B10 매트릭스 (매퍼 파일명·cMap·NULL 센티넬·감사컬럼 추가)
+# EHR4: B1~B7 매트릭스 / EHR5: B1~B11 매트릭스 (매퍼 파일명·cMap·NULL 센티넬·감사컬럼·XML 특수문자 CDATA)
 Read: $PLUGIN_ROOT/profiles/$PROFILE/agents/release-reviewer.md
 Write: .claude/agents/release-reviewer.md
 ```
