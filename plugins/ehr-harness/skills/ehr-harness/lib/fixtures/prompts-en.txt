@@ -1,0 +1,10 @@
+success	perfect ship it
+success	exactly that, confirmed
+success	looks right, lgtm
+success	good, that works
+correction	no, undo that
+correction	revert that change
+correction	wrong file, go back
+correction	cancel, that's not it
+none	check the file structure
+none	what does P_HRM_POST do

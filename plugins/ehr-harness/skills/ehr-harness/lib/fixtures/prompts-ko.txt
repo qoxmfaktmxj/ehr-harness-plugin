@@ -1,0 +1,20 @@
+success	좋아 이 방향으로 확정해줘
+success	딱 그거야 진행
+success	정확한 진단이네
+success	완벽해 다음 단계로
+success	이 방식 맞아 적용하자
+success	확정 ship it
+success	좋습니다 그렇게 가시죠
+success	맞아 그게 정확함
+correction	아니 그거 말고 다시
+correction	다시 해줘 잘못된거 같아
+correction	수정해줘 그 부분 틀렸어
+correction	롤백해 이전 버전으로
+correction	그거 빼고 다시
+correction	없애줘 그 변수
+correction	아니라고 다시 봐
+correction	되돌려줘 원래대로
+none	JSP 파일 위치 알려줘
+none	그룹웨어 배치 시점은 언제야
+none	checkMatLeave 함수 통합 검토
+none	대출이자 계산 로직 분석
