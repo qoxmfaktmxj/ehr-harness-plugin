@@ -307,7 +307,7 @@ v4 와의 차이는 `ehr_cycle.learnings_meta` 1개 객체 추가뿐. 기존 v4 
 | `promotion_policy` | scoring 설정. canonical hash 포함 (설정값). |
 | `capture_enabled` | false 면 capture hook 이 silent skip. canonical hash 포함. |
 
-### Canonical hash 산정 시 제외 필드
+### Canonical hash 산정 시 제외 필드 (의사코드)
 
 ```jq
 del(
@@ -320,13 +320,27 @@ del(
 )
 ```
 
+**실 구현은 node 기반 (Windows + jq 미설치 환경 정책)**. 등가 동작:
+
+```js
+const m = JSON.parse(...);
+delete m.schema_version;
+if (m.ehr_cycle?.learnings_meta) {
+  delete m.ehr_cycle.learnings_meta.last_harvest_at;
+  delete m.ehr_cycle.learnings_meta.pending_count;
+  delete m.ehr_cycle.learnings_meta.promoted_count;
+  delete m.ehr_cycle.learnings_meta.rejected_count;
+  delete m.ehr_cycle.learnings_meta.staged_nonces;
+}
+```
+
 ### v4 → v5 마이그레이션 알고리즘
 
-`harness-state.sh::ehr_state_migrate_v4_to_v5(path)` 가 6단계 처리:
+`harness-state.sh::hs_migrate_v4_to_v5(path)` 가 6단계 처리:
 
-1. 백업: `.ehr-bak/harness-v4-${ts}.json`
-2. jq spread 로 unknown field 보존 + `learnings_meta` 추가
+1. 백업: `.ehr-bak/harness-v4-${ts}-$$.json` (PID 포함으로 1초 내 재호출 충돌 방지)
+2. node 기반 deep clone + targeted append 로 unknown field 보존 + `learnings_meta` 추가
 3. schema validation (`schema_version == 5 && .ehr_cycle.learnings_meta != null`)
-4. unknown field 보존 검증 — `del(.schema_version, .ehr_cycle.learnings_meta)` 결과가 v4 와 동일한지 diff
+4. unknown field 보존 검증 — `schema_version` + `learnings_meta` 제외 후 deep stable stringify 비교 (nested 객체/배열 포함)
 5. canonical hash 갱신 (위 제외 필드 기준)
 6. 원자 교체. 실패 시 백업 복원 + `migration-failed.log` + v4 fallback.

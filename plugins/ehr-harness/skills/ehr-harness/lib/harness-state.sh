@@ -281,15 +281,33 @@ hs_get_analysis() {
 }
 
 # === v4 → v5 migration (Stage 1) ===
+
+# ── deep stable stringify (중첩 객체/배열 포함, 키 정렬) ──
+# schema_version 과 ehr_cycle.learnings_meta 를 제외한 결과를 stdout 에 출력.
+# Args: $1 = file path (환경변수 MFP 로 전달)
+_hs_stable_stringify_no_metadata() {
+  MFP="$1" node -e "
+    const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8'));
+    delete m.schema_version;
+    if(m.ehr_cycle) delete m.ehr_cycle.learnings_meta;
+    const stable=(o)=>{
+      if(o===null||typeof o!=='object')return JSON.stringify(o);
+      if(Array.isArray(o))return '['+o.map(stable).join(',')+']';
+      return '{'+Object.keys(o).sort().map(k=>JSON.stringify(k)+':'+stable(o[k])).join(',')+'}';
+    };
+    process.stdout.write(stable(m));
+  " 2>/dev/null
+}
+
 # Strict-append: schema_version 만 5로 올리고 learnings_meta 추가.
 # 기존 필드 (unknown 포함) 모두 보존.
 # Args: $1 = HARNESS.json path
 # Returns: 0 ok / 0 already-v5 or non-v4 (no-op) / 2 fatal
-ehr_state_migrate_v4_to_v5() {
+hs_migrate_v4_to_v5() {
   local path="$1"
   local proj_dir; proj_dir="$(dirname "$path")"
   local bak_dir="$proj_dir/.ehr-bak"
-  local ts; ts="$(date +%Y%m%dT%H%M%S 2>/dev/null || date)"
+  local ts; ts="$(date +%Y%m%dT%H%M%S 2>/dev/null || date)-$$"
 
   [ -f "$path" ] || return 2
   command -v node >/dev/null 2>&1 || return 2
@@ -347,20 +365,10 @@ ehr_state_migrate_v4_to_v5() {
     return 2
   }
 
-  # 4. unknown field 보존 검증 — schema_version + learnings_meta 제외 후 동일해야 함
+  # 4. unknown field 보존 검증 — schema_version + learnings_meta 제외 후 deep 비교
   local before after
-  before=$(MFP="$path" node -e "
-    const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8'));
-    delete m.schema_version;
-    if(m.ehr_cycle) delete m.ehr_cycle.learnings_meta;
-    process.stdout.write(JSON.stringify(m,Object.keys(m).sort()));
-  " 2>/dev/null)
-  after=$(MFP="$tmp" node -e "
-    const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8'));
-    delete m.schema_version;
-    if(m.ehr_cycle) delete m.ehr_cycle.learnings_meta;
-    process.stdout.write(JSON.stringify(m,Object.keys(m).sort()));
-  " 2>/dev/null)
+  before=$(_hs_stable_stringify_no_metadata "$path")
+  after=$(_hs_stable_stringify_no_metadata "$tmp")
   if [ "$before" != "$after" ]; then
     rm -f "$tmp"
     cp "$bak_dir/harness-v4-${ts}.json" "$path"

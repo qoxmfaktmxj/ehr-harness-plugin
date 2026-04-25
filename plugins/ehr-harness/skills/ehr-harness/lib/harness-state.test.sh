@@ -426,43 +426,73 @@ mkdir -p "$TDIR_MIG"
 FIXTURE_BASE="$SCRIPT_DIR/fixtures/learnings/harness-v4-baseline.json"
 cp "$FIXTURE_BASE" "$TDIR_MIG/HARNESS.json"
 
-ehr_state_migrate_v4_to_v5 "$TDIR_MIG/HARNESS.json"
+hs_migrate_v4_to_v5 "$TDIR_MIG/HARNESS.json"
 mig_rc=$?
-if [ "$mig_rc" = "0" ]; then echo "PASS: migration exit 0"; else echo "FAIL: migration exit=$mig_rc"; fi
+[ "$mig_rc" = "0" ] && pass "migration exit 0" || fail "migration exit=$mig_rc"
 
 # schema_version bumped
 sv=$(MFP="$TDIR_MIG/HARNESS.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).schema_version))")
-if [ "$sv" = "5" ]; then echo "PASS: schema_version=5"; else echo "FAIL: schema_version=$sv"; fi
+[ "$sv" = "5" ] && pass "schema_version=5" || fail "schema_version=$sv"
 
 # learnings_meta defaults
 cap=$(MFP="$TDIR_MIG/HARNESS.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).ehr_cycle.learnings_meta.capture_enabled))")
-if [ "$cap" = "true" ]; then echo "PASS: capture_enabled=true"; else echo "FAIL: capture_enabled=$cap"; fi
+[ "$cap" = "true" ] && pass "capture_enabled=true" || fail "capture_enabled=$cap"
 
 th=$(MFP="$TDIR_MIG/HARNESS.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).ehr_cycle.learnings_meta.promotion_policy.threshold))")
-if [ "$th" = "3" ]; then echo "PASS: threshold=3"; else echo "FAIL: threshold=$th"; fi
+[ "$th" = "3" ] && pass "threshold=3" || fail "threshold=$th"
 
 # unknown top-level 보존
 xu=$(MFP="$TDIR_MIG/HARNESS.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).x_unknown_field_for_strict_append_test))")
-if [ "$xu" = "must-be-preserved" ]; then echo "PASS: unknown field preserved"; else echo "FAIL: unknown lost ($xu)"; fi
+[ "$xu" = "must-be-preserved" ] && pass "unknown field preserved" || fail "unknown lost ($xu)"
 
-# ehr_cycle 하위 필드 보존
+# ehr_cycle 하위 필드 보존 (nested)
 cmp_id=$(MFP="$TDIR_MIG/HARNESS.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).ehr_cycle.compounds[0].id))")
-if [ "$cmp_id" = "paycalc-trigger" ]; then echo "PASS: compounds preserved"; else echo "FAIL: compounds=$cmp_id"; fi
+[ "$cmp_id" = "paycalc-trigger" ] && pass "compounds[0].id preserved" || fail "compounds=$cmp_id"
 
 pref_to=$(MFP="$TDIR_MIG/HARNESS.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).ehr_cycle.preferences_history[0].to))")
-if [ "$pref_to" = "silent" ]; then echo "PASS: preferences preserved"; else echo "FAIL: pref=$pref_to"; fi
+[ "$pref_to" = "silent" ] && pass "preferences_history[0].to preserved" || fail "pref=$pref_to"
 
 # backup 생성 확인
 if ls "$TDIR_MIG/.ehr-bak/" 2>/dev/null | grep -q '^harness-v4-'; then
-  echo "PASS: backup created"
+  pass "backup created"
 else
-  echo "FAIL: backup missing"
+  fail "backup missing"
 fi
 
 # idempotency: 재실행 → v5 그대로 (재마이그레이션 안 함)
-ehr_state_migrate_v4_to_v5 "$TDIR_MIG/HARNESS.json"
+hs_migrate_v4_to_v5 "$TDIR_MIG/HARNESS.json"
 sv2=$(MFP="$TDIR_MIG/HARNESS.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).schema_version))")
-if [ "$sv2" = "5" ]; then echo "PASS: idempotent v5"; else echo "FAIL: idempotency broken=$sv2"; fi
+[ "$sv2" = "5" ] && pass "idempotent v5" || fail "idempotency broken=$sv2"
 
-# === ALL MIGRATION TESTS PASSED 마커 ===
+# === M1: 보존 검증 자체가 동작하는지 — nested mutation 감지 ===
+echo "=== preservation guard unit test (M1) ==="
+TDIR_MUT="$TMP/mig-mutation"
+mkdir -p "$TDIR_MUT"
+
+# 정상 마이그레이션 기준 v5 생성
+cp "$FIXTURE_BASE" "$TDIR_MUT/HARNESS.json"
+hs_migrate_v4_to_v5 "$TDIR_MUT/HARNESS.json"
+
+# 보존 검증 로직을 직접 단위 테스트:
+# v5 결과에서 compounds[0].id 를 변형한 파일 A 와 원본 v4 를 비교했을 때
+# _hs_stable_stringify_no_metadata 가 다른 결과를 내야 함 (=보존 검증이 잡음)
+MUTATED="$TDIR_MUT/HARNESS_mutated.json"
+MFP="$TDIR_MUT/HARNESS.json" MOUT="$MUTATED" node -e "
+  const fs=require('fs');
+  const m=JSON.parse(fs.readFileSync(process.env.MFP,'utf8'));
+  // compounds[0].id 를 일부러 변형 (nested 누락 시뮬)
+  if(m.ehr_cycle && m.ehr_cycle.compounds && m.ehr_cycle.compounds[0]){
+    m.ehr_cycle.compounds[0].id='MUTATED';
+  }
+  fs.writeFileSync(process.env.MOUT, JSON.stringify(m,null,2),'utf8');
+"
+
+sig_orig=$(_hs_stable_stringify_no_metadata "$FIXTURE_BASE")
+sig_mut=$(_hs_stable_stringify_no_metadata "$MUTATED")
+if [ "$sig_orig" != "$sig_mut" ]; then
+  pass "preservation guard: nested mutation detected (compounds[0].id 변형 잡음)"
+else
+  fail "preservation guard: nested mutation NOT detected — deep stringify 미동작"
+fi
+
 echo "ALL MIGRATION TESTS PASSED"
