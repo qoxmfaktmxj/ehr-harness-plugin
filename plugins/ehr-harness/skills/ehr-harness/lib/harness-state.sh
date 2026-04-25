@@ -279,3 +279,97 @@ hs_get_analysis() {
     }catch(e){process.stdout.write('null');}
   "
 }
+
+# === v4 → v5 migration (Stage 1) ===
+# Strict-append: schema_version 만 5로 올리고 learnings_meta 추가.
+# 기존 필드 (unknown 포함) 모두 보존.
+# Args: $1 = HARNESS.json path
+# Returns: 0 ok / 0 already-v5 or non-v4 (no-op) / 2 fatal
+ehr_state_migrate_v4_to_v5() {
+  local path="$1"
+  local proj_dir; proj_dir="$(dirname "$path")"
+  local bak_dir="$proj_dir/.ehr-bak"
+  local ts; ts="$(date +%Y%m%dT%H%M%S 2>/dev/null || date)"
+
+  [ -f "$path" ] || return 2
+  command -v node >/dev/null 2>&1 || return 2
+
+  local sv
+  sv=$(MFP="$path" node -e "
+    try{
+      const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8'));
+      process.stdout.write(String(m.schema_version||'0'));
+    }catch(e){process.stdout.write('0');}
+  ")
+  if [ "$sv" = "5" ]; then return 0; fi   # idempotent
+  if [ "$sv" != "4" ]; then return 0; fi  # 다른 버전은 본 함수 미적용
+
+  # 1. 백업
+  mkdir -p "$bak_dir" || return 2
+  cp "$path" "$bak_dir/harness-v4-${ts}.json" || return 2
+
+  # 2. node spread — unknown field 보존 + learnings_meta 추가
+  local tmp="${path}.v5tmp"
+  MFP="$path" OUT="$tmp" node -e "
+    const fs=require('fs');
+    const m=JSON.parse(fs.readFileSync(process.env.MFP,'utf8'));
+    m.schema_version=5;
+    if(!m.ehr_cycle) m.ehr_cycle={};
+    if(!m.ehr_cycle.learnings_meta){
+      m.ehr_cycle.learnings_meta={
+        last_harvest_at:null,
+        pending_count:0,
+        promoted_count:0,
+        rejected_count:0,
+        staged_nonces:{},
+        promotion_policy:{
+          success_weight:2,
+          correction_weight:1,
+          threshold:3,
+          distinct_sessions_min:2,
+          same_session_cap:2
+        },
+        capture_enabled:true
+      };
+    }
+    fs.writeFileSync(process.env.OUT,JSON.stringify(m,null,2),'utf8');
+  " || { rm -f "$tmp"; return 2; }
+
+  # 3. schema validation
+  MFP="$tmp" node -e "
+    const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8'));
+    if(m.schema_version===5 && m.ehr_cycle && m.ehr_cycle.learnings_meta!=null){process.exit(0);}
+    process.exit(1);
+  " >/dev/null 2>&1 || {
+    rm -f "$tmp"
+    cp "$bak_dir/harness-v4-${ts}.json" "$path"
+    printf '[migration-failed] schema validation\n' >> "$bak_dir/migration-failed.log"
+    return 2
+  }
+
+  # 4. unknown field 보존 검증 — schema_version + learnings_meta 제외 후 동일해야 함
+  local before after
+  before=$(MFP="$path" node -e "
+    const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8'));
+    delete m.schema_version;
+    if(m.ehr_cycle) delete m.ehr_cycle.learnings_meta;
+    process.stdout.write(JSON.stringify(m,Object.keys(m).sort()));
+  " 2>/dev/null)
+  after=$(MFP="$tmp" node -e "
+    const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8'));
+    delete m.schema_version;
+    if(m.ehr_cycle) delete m.ehr_cycle.learnings_meta;
+    process.stdout.write(JSON.stringify(m,Object.keys(m).sort()));
+  " 2>/dev/null)
+  if [ "$before" != "$after" ]; then
+    rm -f "$tmp"
+    cp "$bak_dir/harness-v4-${ts}.json" "$path"
+    printf '[migration-failed] strict-append violation\n' >> "$bak_dir/migration-failed.log"
+    return 2
+  fi
+
+  # 5. canonical hash 는 호출자 책임 (본 함수는 데이터만 갱신)
+  # 6. 원자 교체
+  mv "$tmp" "$path" || return 2
+  return 0
+}

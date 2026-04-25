@@ -1,0 +1,38 @@
+{
+  "schema_version": 4,
+  "plugin_name": "ehr-harness",
+  "plugin_version": "1.9.5",
+  "profile": "ehr4",
+  "generated_at": "2026-04-15T12:00:00+09:00",
+  "updated_at": "2026-04-20T09:30:00+09:00",
+  "sources": {"profiles/shared/settings.json": "sha256:aaa"},
+  "outputs": {".claude/settings.json": "sha256:bbb", "AGENTS.md": "sha256:ccc"},
+  "auth_model": {
+    "common_controllers": ["GetDataList", "SaveData"],
+    "auth_service_class": "AuthTableService",
+    "auth_injection_methods": ["query_placeholder"],
+    "auth_tables": ["THRM151_AUTH"],
+    "auth_functions": ["F_COM_GET_SQL_AUTH"],
+    "session_vars": ["ssnEnterCd", "ssnSabun"]
+  },
+  "db_verification": {"ddl_path": null, "db_access": "available", "b3_strategy": "db-only"},
+  "ddl_authoring": {"enabled": false, "table_path": null, "procedure_path": null, "function_path": null, "naming_pattern": null, "header_template_path": null, "existing_tables": []},
+  "analysis": {
+    "analyzed_at": "2026-04-15T14:23:01+09:00",
+    "module_map": [{"name": "hrm", "file_count": 120}],
+    "session_vars": ["ssnEnterCd", "ssnSabun"],
+    "authSqlID": ["THRM151"],
+    "law_counts": {"A_direct_controller": 45, "B_getData": 79, "B_saveData": 68, "C_hybrid": 12, "D_execPrc": 15},
+    "critical_proc_found": ["P_HRM_POST"],
+    "critical_proc_missing": [],
+    "procedure_count": 234,
+    "procedure_sample": ["P_HRM_POST"],
+    "trigger_count": 18
+  },
+  "ehr_cycle": {
+    "compounds": [{"id": "paycalc-trigger", "ts": "2026-04-18T10:00:00+09:00", "revision": 1}],
+    "promoted": [],
+    "preferences_history": [{"ts": "2026-04-19T11:00:00+09:00", "key": "SUGGEST_MODE", "from": "ask", "to": "silent"}]
+  },
+  "x_unknown_field_for_strict_append_test": "must-be-preserved"
+}

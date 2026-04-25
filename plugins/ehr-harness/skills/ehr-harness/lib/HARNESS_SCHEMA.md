@@ -267,3 +267,66 @@ v3 에 **`ehr_cycle` 섹션**을 추가하고 `outputs[]` 에 신규 7개 엔트
 1. `ehr_cycle: { version:1, compounds:[], promoted:[], preferences_history:[] }` 주입
 2. `outputs[]` 에 신규 7개 엔트리(커맨드 5 + 에이전트 1 + 해시는 생성 후 계산) 추가
 3. `schema_version: 4`, `plugin_version: "1.9.0"` 기록
+
+## Schema (version 5) — Learnings Meta 도입
+
+v4 와의 차이는 `ehr_cycle.learnings_meta` 1개 객체 추가뿐. 기존 v4 필드는 모두 그대로 보존된다 (strict-append).
+
+### `ehr_cycle.learnings_meta`
+
+```json
+{
+  "ehr_cycle": {
+    "compounds": [],
+    "promoted": [],
+    "preferences_history": [],
+    "learnings_meta": {
+      "last_harvest_at": null,
+      "pending_count": 0,
+      "promoted_count": 0,
+      "rejected_count": 0,
+      "staged_nonces": {},
+      "promotion_policy": {
+        "success_weight": 2,
+        "correction_weight": 1,
+        "threshold": 3,
+        "distinct_sessions_min": 2,
+        "same_session_cap": 2
+      },
+      "capture_enabled": true
+    }
+  }
+}
+```
+
+| 필드 | 의미 |
+|---|---|
+| `last_harvest_at` | 마지막 `/ehr-harvest-learnings` 실행 시각. null = 미실행. |
+| `pending_count` / `promoted_count` / `rejected_count` | 누적 카운터. canonical hash 에서 제외 (volatile). |
+| `staged_nonces` | `{topic: sha256_hex}`. merge 시 검증. canonical hash 제외. |
+| `promotion_policy` | scoring 설정. canonical hash 포함 (설정값). |
+| `capture_enabled` | false 면 capture hook 이 silent skip. canonical hash 포함. |
+
+### Canonical hash 산정 시 제외 필드
+
+```jq
+del(
+  .schema_version,
+  .ehr_cycle.learnings_meta.last_harvest_at,
+  .ehr_cycle.learnings_meta.pending_count,
+  .ehr_cycle.learnings_meta.promoted_count,
+  .ehr_cycle.learnings_meta.rejected_count,
+  .ehr_cycle.learnings_meta.staged_nonces
+)
+```
+
+### v4 → v5 마이그레이션 알고리즘
+
+`harness-state.sh::ehr_state_migrate_v4_to_v5(path)` 가 6단계 처리:
+
+1. 백업: `.ehr-bak/harness-v4-${ts}.json`
+2. jq spread 로 unknown field 보존 + `learnings_meta` 추가
+3. schema validation (`schema_version == 5 && .ehr_cycle.learnings_meta != null`)
+4. unknown field 보존 검증 — `del(.schema_version, .ehr_cycle.learnings_meta)` 결과가 v4 와 동일한지 diff
+5. canonical hash 갱신 (위 제외 필드 기준)
+6. 원자 교체. 실패 시 백업 복원 + `migration-failed.log` + v4 fallback.

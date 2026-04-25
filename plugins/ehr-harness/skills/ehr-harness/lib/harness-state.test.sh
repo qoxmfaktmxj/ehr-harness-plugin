@@ -414,3 +414,55 @@ echo "$CYCLE" | grep -q '"id":"NEW"' \
   || fail "hs_write_manifest: ehr_cycle 덮어쓰기 실패 ($CYCLE)"
 
 echo "ALL TESTS PASSED"
+
+# === v4 → v5 migration (Stage 1) ===
+echo "=== v4 → v5 migration tests ==="
+
+# 테스트 디렉토리 준비
+TDIR_MIG="$TMP/migration"
+mkdir -p "$TDIR_MIG"
+
+# fixture 위치
+FIXTURE_BASE="$SCRIPT_DIR/fixtures/learnings/harness-v4-baseline.json"
+cp "$FIXTURE_BASE" "$TDIR_MIG/HARNESS.json"
+
+ehr_state_migrate_v4_to_v5 "$TDIR_MIG/HARNESS.json"
+mig_rc=$?
+if [ "$mig_rc" = "0" ]; then echo "PASS: migration exit 0"; else echo "FAIL: migration exit=$mig_rc"; fi
+
+# schema_version bumped
+sv=$(MFP="$TDIR_MIG/HARNESS.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).schema_version))")
+if [ "$sv" = "5" ]; then echo "PASS: schema_version=5"; else echo "FAIL: schema_version=$sv"; fi
+
+# learnings_meta defaults
+cap=$(MFP="$TDIR_MIG/HARNESS.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).ehr_cycle.learnings_meta.capture_enabled))")
+if [ "$cap" = "true" ]; then echo "PASS: capture_enabled=true"; else echo "FAIL: capture_enabled=$cap"; fi
+
+th=$(MFP="$TDIR_MIG/HARNESS.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).ehr_cycle.learnings_meta.promotion_policy.threshold))")
+if [ "$th" = "3" ]; then echo "PASS: threshold=3"; else echo "FAIL: threshold=$th"; fi
+
+# unknown top-level 보존
+xu=$(MFP="$TDIR_MIG/HARNESS.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).x_unknown_field_for_strict_append_test))")
+if [ "$xu" = "must-be-preserved" ]; then echo "PASS: unknown field preserved"; else echo "FAIL: unknown lost ($xu)"; fi
+
+# ehr_cycle 하위 필드 보존
+cmp_id=$(MFP="$TDIR_MIG/HARNESS.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).ehr_cycle.compounds[0].id))")
+if [ "$cmp_id" = "paycalc-trigger" ]; then echo "PASS: compounds preserved"; else echo "FAIL: compounds=$cmp_id"; fi
+
+pref_to=$(MFP="$TDIR_MIG/HARNESS.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).ehr_cycle.preferences_history[0].to))")
+if [ "$pref_to" = "silent" ]; then echo "PASS: preferences preserved"; else echo "FAIL: pref=$pref_to"; fi
+
+# backup 생성 확인
+if ls "$TDIR_MIG/.ehr-bak/" 2>/dev/null | grep -q '^harness-v4-'; then
+  echo "PASS: backup created"
+else
+  echo "FAIL: backup missing"
+fi
+
+# idempotency: 재실행 → v5 그대로 (재마이그레이션 안 함)
+ehr_state_migrate_v4_to_v5 "$TDIR_MIG/HARNESS.json"
+sv2=$(MFP="$TDIR_MIG/HARNESS.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).schema_version))")
+if [ "$sv2" = "5" ]; then echo "PASS: idempotent v5"; else echo "FAIL: idempotency broken=$sv2"; fi
+
+# === ALL MIGRATION TESTS PASSED 마커 ===
+echo "ALL MIGRATION TESTS PASSED"
