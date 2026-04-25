@@ -351,6 +351,119 @@ grep -q "<!-- HARNESS-MANAGED:analysis_snapshot -->" "$MOCK_TGT" \
   && pass "WP-3 심볼릭링크(mock): 복사 대체 픽스처에서 merge 정상" \
   || fail "WP-3 심볼릭링크(mock): merge 실패"
 
+
+# === Stage 7: apply_staged env gate + nonce + scope ===
+echo "=== apply_staged env/nonce/scope tests ==="
+
+# 변수 격리를 위한 새 TMP
+APPLY_TMP="$(mktemp -d)"
+mkdir -p "$APPLY_TMP/.claude/learnings/staged"
+
+# 기본 HARNESS.json
+cat > "$APPLY_TMP/.claude/HARNESS.json" <<'JSON'
+{"schema_version":5,"profile":"ehr4","ehr_cycle":{"learnings_meta":{"staged_nonces":{}}}}
+JSON
+
+# 기본 staged file
+cat > "$APPLY_TMP/.claude/learnings/staged/test-topic.md" <<'EOF'
+---
+topic: test-topic
+score: 4
+scope: project-local
+target: ehr-lessons/SKILL.md
+---
+
+## 제안 본문
+<!-- EHR-LESSONS:BEGIN test-topic -->
+test rule
+<!-- EHR-LESSONS:END test-topic -->
+EOF
+
+NONCE=$(sha256sum "$APPLY_TMP/.claude/learnings/staged/test-topic.md" | awk '{print $1}')
+
+# HARNESS 의 staged_nonces[topic] 등록 (harvest 가 했을 일)
+HFP="$APPLY_TMP/.claude/HARNESS.json" NONCE="$NONCE" node -e "
+  const fs=require('fs');
+  const p=process.env.HFP;
+  const m=JSON.parse(fs.readFileSync(p,'utf8'));
+  m.ehr_cycle.learnings_meta.staged_nonces['test-topic']=process.env.NONCE;
+  fs.writeFileSync(p, JSON.stringify(m, null, 2));
+"
+
+# === gate 1: EHR_AUDIT_APPROVED 없으면 exit 2 ===
+( cd "$APPLY_TMP" && bash "$SCRIPT_DIR/merge.sh" apply_staged ".claude/learnings/staged/test-topic.md" ) >/dev/null 2>&1
+ec=$?
+[ "$ec" = "2" ] && pass "gate1: no AUDIT_APPROVED → exit 2" || fail "gate1: no AUDIT_APPROVED → exit 2 (got $ec)"
+
+# === gate 2: nonce mismatch → exit 3 ===
+BAD_NONCE="0000000000000000000000000000000000000000000000000000000000000000"
+( cd "$APPLY_TMP" && EHR_AUDIT_APPROVED=1 EHR_NONCE="$BAD_NONCE" \
+   bash "$SCRIPT_DIR/merge.sh" apply_staged ".claude/learnings/staged/test-topic.md" ) >/dev/null 2>&1
+ec=$?
+[ "$ec" = "3" ] && pass "gate2: nonce mismatch → exit 3" || fail "gate2: nonce mismatch → exit 3 (got $ec)"
+
+# === gate 3: org-template reserved → exit 5 ===
+sed -i 's/scope: project-local/scope: org-template/' "$APPLY_TMP/.claude/learnings/staged/test-topic.md"
+NONCE2=$(sha256sum "$APPLY_TMP/.claude/learnings/staged/test-topic.md" | awk '{print $1}')
+HFP="$APPLY_TMP/.claude/HARNESS.json" NONCE="$NONCE2" node -e "
+  const fs=require('fs');
+  const m=JSON.parse(fs.readFileSync(process.env.HFP,'utf8'));
+  m.ehr_cycle.learnings_meta.staged_nonces['test-topic']=process.env.NONCE;
+  fs.writeFileSync(process.env.HFP, JSON.stringify(m, null, 2));
+"
+( cd "$APPLY_TMP" && EHR_AUDIT_APPROVED=1 EHR_NONCE="$NONCE2" \
+   bash "$SCRIPT_DIR/merge.sh" apply_staged ".claude/learnings/staged/test-topic.md" ) >/dev/null 2>&1
+ec=$?
+[ "$ec" = "5" ] && pass "gate3: org-template → exit 5" || fail "gate3: org-template → exit 5 (got $ec)"
+
+# === gate 4: project-local 적용 성공 → staged.applied 이동 + SKILL.md 업데이트 ===
+sed -i 's/scope: org-template/scope: project-local/' "$APPLY_TMP/.claude/learnings/staged/test-topic.md"
+NONCE3=$(sha256sum "$APPLY_TMP/.claude/learnings/staged/test-topic.md" | awk '{print $1}')
+HFP="$APPLY_TMP/.claude/HARNESS.json" NONCE="$NONCE3" node -e "
+  const fs=require('fs');
+  const m=JSON.parse(fs.readFileSync(process.env.HFP,'utf8'));
+  m.ehr_cycle.learnings_meta.staged_nonces['test-topic']=process.env.NONCE;
+  fs.writeFileSync(process.env.HFP, JSON.stringify(m, null, 2));
+"
+
+mkdir -p "$APPLY_TMP/.claude/skills/ehr-lessons"
+echo '# ehr-lessons (project-local)' > "$APPLY_TMP/.claude/skills/ehr-lessons/SKILL.md"
+
+( cd "$APPLY_TMP" && EHR_AUDIT_APPROVED=1 EHR_NONCE="$NONCE3" \
+   bash "$SCRIPT_DIR/merge.sh" apply_staged ".claude/learnings/staged/test-topic.md" ) >/dev/null 2>&1
+ec=$?
+[ "$ec" = "0" ] && pass "gate4: project-local apply success" || fail "gate4: project-local apply success (got $ec)"
+
+# staged.applied 이동
+[ -f "$APPLY_TMP/.claude/learnings/staged.applied/test-topic.md" ] && pass "gate4: moved to staged.applied" || fail "gate4: moved to staged.applied"
+
+# SKILL.md 에 marker 블록 append
+grep -q 'EHR-LESSONS:BEGIN test-topic' "$APPLY_TMP/.claude/skills/ehr-lessons/SKILL.md" && pass "gate4: SKILL.md updated" || fail "gate4: SKILL.md updated"
+
+# === gate 5: unknown scope → exit 6 ===
+mkdir -p "$APPLY_TMP/.claude/learnings/staged"
+cat > "$APPLY_TMP/.claude/learnings/staged/u.md" <<'EOF'
+---
+topic: u
+score: 4
+scope: weird-unknown-scope
+target: AGENTS.md
+---
+EOF
+NONCE_U=$(sha256sum "$APPLY_TMP/.claude/learnings/staged/u.md" | awk '{print $1}')
+HFP="$APPLY_TMP/.claude/HARNESS.json" NONCE="$NONCE_U" node -e "
+  const fs=require('fs');
+  const m=JSON.parse(fs.readFileSync(process.env.HFP,'utf8'));
+  m.ehr_cycle.learnings_meta.staged_nonces['u']=process.env.NONCE;
+  fs.writeFileSync(process.env.HFP, JSON.stringify(m, null, 2));
+"
+( cd "$APPLY_TMP" && EHR_AUDIT_APPROVED=1 EHR_NONCE="$NONCE_U" \
+   bash "$SCRIPT_DIR/merge.sh" apply_staged ".claude/learnings/staged/u.md" ) >/dev/null 2>&1
+ec=$?
+[ "$ec" = "6" ] && pass "gate5: unknown scope → exit 6" || fail "gate5: unknown scope → exit 6 (got $ec)"
+
+rm -rf "$APPLY_TMP"
+
 echo ""
 echo "=========================================="
 echo "  PASSED: $PASS / FAILED: $FAIL"

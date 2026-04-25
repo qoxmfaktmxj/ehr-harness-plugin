@@ -369,3 +369,33 @@ ehr_audit_report() {
   [[ -n "$pref" ]] && echo "[Preferences 파싱]" && echo "$pref" && echo ""
   echo "=== 리포트 종료 ==="
 }
+
+# === Stage 7: learnings drift ===
+# staged/*.md 가 있으면 audit 결과에 "학습 제안 N건" 로 표시.
+# 출력: JSON array 또는 [].
+ehr_audit_learnings_drift() {
+  local proj="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+  local staged_dir="$proj/.claude/learnings/staged"
+  [ -d "$staged_dir" ] || { echo "[]"; return; }
+
+  command -v node >/dev/null 2>&1 || { echo "[]"; return; }
+
+  # node 로 staged/*.md front-matter 추출
+  STAGED_DIR="$staged_dir" node -e "
+    const fs=require('fs'),path=require('path');
+    const dir=process.env.STAGED_DIR;
+    let files=[];
+    try { files=fs.readdirSync(dir).filter(f=>f.endsWith('.md')); } catch(e) {}
+    const out=[];
+    for (const f of files) {
+      try {
+        const txt=fs.readFileSync(path.join(dir,f),'utf8');
+        const topic=(txt.match(/^topic:\s*(\S+)/m)||[])[1]||'';
+        const score=parseInt((txt.match(/^score:\s*(\d+)/m)||[])[1]||'0',10);
+        const scope=(txt.match(/^scope:\s*(\S+)/m)||[])[1]||'project-local';
+        out.push({topic, score, scope, path: path.join(dir, f)});
+      } catch(e) {}
+    }
+    process.stdout.write(JSON.stringify(out));
+  " 2>/dev/null
+}

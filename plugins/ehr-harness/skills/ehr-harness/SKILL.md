@@ -1344,6 +1344,21 @@ AUDIT_STRATEGY=3 은 stamped Step 3-PRE-6 의 UPDATE_STRATEGY=3 경로와 동일
   - 2: "취소"
 ```
 
+### learnings_drift (v1.10+)
+
+`/ehr-harvest-learnings` 가 생성한 `.claude/learnings/staged/*.md` 가 있으면 audit 결과에 `learnings_drift` 로 표시. 사용자 승인 시 다음 실행:
+
+```bash
+export EHR_AUDIT_APPROVED=1
+export EHR_NONCE="$(sha256sum staged/<topic>.md | awk '{print $1}')"
+bash skills/ehr-harness/lib/merge.sh apply_staged staged/<topic>.md
+```
+
+scope 별 적용 대상:
+- `project-local` (기본): 프로젝트의 `AGENTS.md` 또는 `.claude/skills/ehr-lessons/SKILL.md`
+- `plugin-dev` (cwd = 플러그인 repo): `plugins/ehr-harness/profiles/<profile>/...`
+- `org-template`: v1.10 reserved (exit 5)
+
 ---
 
 ## Step 3: 파일 생성

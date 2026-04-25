@@ -204,3 +204,155 @@ merge_managed_section() {
     fs.writeFileSync(file, out);
   '
 }
+
+# === apply_staged (Stage 7) ===
+# v1.10 self-evolving merge entry. audit 흐름이 EHR_AUDIT_APPROVED=1 + EHR_NONCE 세팅 후 호출.
+# Args: $1 = staged file path (PROJECT_DIR 상대 또는 절대)
+# Exit codes: 0 ok / 2 no approval / 3 nonce mismatch / 4 plugin-dev cwd 위반 / 5 org-template / 6 unknown scope
+apply_staged() {
+  local staged="$1"
+  local proj="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+  case "$staged" in
+    /*|[A-Za-z]:[/\\]*) : ;;  # absolute (Unix or Windows)
+    *) staged="$proj/$staged" ;;
+  esac
+
+  # gate 1: env
+  if [ -z "${EHR_AUDIT_APPROVED:-}" ] || [ -z "${EHR_NONCE:-}" ]; then
+    echo "FATAL: EHR_AUDIT_APPROVED + EHR_NONCE 필수" >&2
+    return 2
+  fi
+
+  [ -f "$staged" ] || { echo "FATAL: staged file not found: $staged" >&2; return 2; }
+
+  # gate 2: nonce 형식
+  if ! printf '%s' "$EHR_NONCE" | grep -qE '^[a-f0-9]{64}$'; then
+    echo "FATAL: EHR_NONCE format invalid (expect ^[a-f0-9]{64}$)" >&2
+    return 3
+  fi
+
+  # gate 2-b: staged file 의 실제 sha256 과 비교
+  local actual_nonce
+  actual_nonce=$(sha256sum "$staged" 2>/dev/null | awk '{print $1}')
+  if [ -z "$actual_nonce" ]; then
+    actual_nonce=$(MFP="$staged" node -e "
+      const fs=require('fs'),c=require('crypto');
+      const h=c.createHash('sha256').update(fs.readFileSync(process.env.MFP)).digest('hex');
+      process.stdout.write(h);
+    " 2>/dev/null)
+  fi
+  if [ "$actual_nonce" != "$EHR_NONCE" ]; then
+    echo "FATAL: nonce mismatch (staged 변조 의심)" >&2
+    return 3
+  fi
+
+  # gate 2-c: HARNESS.json 의 staged_nonces[topic] 과도 비교
+  local topic; topic=$(awk '/^topic:/ {print $2; exit}' "$staged")
+  local registered
+  registered=$(MFP="$proj/.claude/HARNESS.json" TOPIC="$topic" node -e "
+    try {
+      const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8'));
+      const n=m && m.ehr_cycle && m.ehr_cycle.learnings_meta && m.ehr_cycle.learnings_meta.staged_nonces && m.ehr_cycle.learnings_meta.staged_nonces[process.env.TOPIC];
+      if (n) process.stdout.write(n);
+    } catch(e) {}
+  " 2>/dev/null)
+  if [ -n "$registered" ] && [ "$registered" != "$actual_nonce" ]; then
+    echo "FATAL: HARNESS staged_nonces mismatch" >&2
+    return 3
+  fi
+
+  # scope 결정
+  local scope; scope=$(awk '/^scope:/ {print $2; exit}' "$staged")
+  scope="${scope:-project-local}"
+
+  case "$scope" in
+    project-local)
+      _apply_project_local "$staged" "$proj" || return $?
+      ;;
+    plugin-dev)
+      # cwd 가 플러그인 repo 인지 (plugin.json 의 name == ehr-harness)
+      local pjson="$proj/plugins/ehr-harness/.claude-plugin/plugin.json"
+      local pname=""
+      if [ -f "$pjson" ]; then
+        pname=$(MFP="$pjson" node -e "
+          try { const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')); if (m && m.name) process.stdout.write(m.name); }
+          catch(e) {}
+        " 2>/dev/null)
+      fi
+      if [ "$pname" != "ehr-harness" ]; then
+        echo "FATAL: plugin-dev scope 인데 cwd 가 플러그인 repo 가 아님" >&2
+        return 4
+      fi
+      _apply_plugin_dev "$staged" "$proj" || return $?
+      ;;
+    org-template)
+      echo "FATAL: org-template scope is reserved in v1.10" >&2
+      return 5
+      ;;
+    *)
+      echo "FATAL: unknown scope: $scope" >&2
+      return 6
+      ;;
+  esac
+
+  # 적용 후: staged.applied 이동
+  mkdir -p "$proj/.claude/learnings/staged.applied"
+  mv "$staged" "$proj/.claude/learnings/staged.applied/" 2>/dev/null
+  return 0
+}
+
+_apply_project_local() {
+  local staged="$1" proj="$2"
+  local target; target=$(awk '/^target:/ {print $2; exit}' "$staged")
+  case "$target" in
+    AGENTS.md|AGENTS.md.skel)
+      _append_marker_block "$staged" "$proj/AGENTS.md"
+      ;;
+    ehr-lessons/SKILL.md|ehr-lessons*)
+      mkdir -p "$proj/.claude/skills/ehr-lessons"
+      [ -f "$proj/.claude/skills/ehr-lessons/SKILL.md" ] || \
+        echo "# ehr-lessons (project-local)" > "$proj/.claude/skills/ehr-lessons/SKILL.md"
+      _append_marker_block "$staged" "$proj/.claude/skills/ehr-lessons/SKILL.md"
+      ;;
+    *)
+      echo "FATAL: unknown target: $target" >&2
+      return 1
+      ;;
+  esac
+}
+
+_apply_plugin_dev() {
+  local staged="$1" proj="$2"
+  local target; target=$(awk '/^target:/ {print $2; exit}' "$staged")
+  local profile
+  profile=$(MFP="$proj/.claude/HARNESS.json" node -e "
+    try { const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')); process.stdout.write(m.profile||'ehr5'); }
+    catch(e) { process.stdout.write('ehr5'); }
+  " 2>/dev/null)
+  case "$target" in
+    AGENTS.md.skel)
+      _append_marker_block "$staged" "$proj/plugins/ehr-harness/profiles/$profile/skeleton/AGENTS.md.skel"
+      ;;
+    ehr-lessons/SKILL.md|ehr-lessons*)
+      _append_marker_block "$staged" "$proj/plugins/ehr-harness/profiles/$profile/skills/ehr-lessons/SKILL.md"
+      ;;
+    *)
+      echo "FATAL: unknown target (plugin-dev): $target" >&2
+      return 1
+      ;;
+  esac
+}
+
+# staged 의 marker 블록만 target 끝에 append
+_append_marker_block() {
+  local staged="$1" target="$2"
+  awk '/<!-- EHR-LESSONS:BEGIN/,/<!-- EHR-LESSONS:END/' "$staged" >> "$target"
+}
+
+# script 직접 실행 시 dispatcher
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  case "${1:-}" in
+    apply_staged) shift; apply_staged "$@" ;;
+    *) echo "Usage: merge.sh apply_staged <staged-file>" >&2; exit 1 ;;
+  esac
+fi
