@@ -2073,6 +2073,24 @@ profiles/$PROFILE/agents/db-impact-reviewer.md|$PLUGIN_ROOT/profiles/$PROFILE/ag
 
 ---
 
+### Step 4-J. .gitignore 자동 추가 (v1.10+)
+
+생성/업데이트 마지막에 프로젝트 `.gitignore` 검사:
+
+1. `.gitignore` 가 존재하지 않으면 생성.
+2. 다음 라인이 없으면 추가:
+   ```
+   # ehr-harness self-evolving learnings (do not commit)
+   .claude/learnings/
+   .claude/.ehr-hook-degraded.flag
+   ```
+3. 추가했으면 사용자에게 알림: "프로젝트 .gitignore 에 self-evolving 캡처 디렉토리를 추가했습니다."
+4. 이미 있으면 침묵.
+
+**가드 7 + Stage 2 fail-safe**: hook 이 capture 시 이 항목들이 .gitignore 에 없으면 silent skip. 따라서 본 step 이 누락되면 self-evolving 기능 자체가 비활성. SKILL.md update 흐름에서 항상 실행.
+
+---
+
 ### 4-G. HARNESS.json 갱신 (모든 모드에서 마지막으로 수행)
 
 ```bash

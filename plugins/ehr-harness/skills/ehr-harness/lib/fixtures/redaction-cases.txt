@@ -1,0 +1,18 @@
+# Format: <expected_count>	<input>	<expected_output_pattern>
+# expected_count = redaction 횟수 (정수). 0 이면 PII 없음 = no-op
+# expected_output_pattern = grep -E 패턴 (출력에 PII 잔존 없어야 함을 검증)
+2	20236 출산휴가 검증해줘 2026-04-21 시작	\[ID\].*\[DATE\]
+1	사번 12345 의 데이터 조회	\[ID\]
+1	이윤정 책임에게 전달	\[NAME\]
+2	박철수 수석이 2026-03-15 작성	\[NAME\].*\[DATE\]
+1	조직코드 HRM001 권한	\[ORG\]
+0	JSP만 수정해줘	^JSP만 수정해줘$
+0	이 방향으로 확정	^이 방향으로 확정$
+0	아니 다시 해줘	^아니 다시 해줘$
+3	20207 사번이 2026-04-19 김민수 책임에게	\[ID\].*\[DATE\].*\[NAME\]
+1	2026-04-25	\[DATE\]
+1	2026-04-25T14:30:00	\[DATE\]
+1	yyyy-mm-dd 형식 2026/04/25 도	\[DATE\]
+0	checkMatLeave() 함수로 통합	^checkMatLeave\(\) 함수로 통합$
+0	그룹웨어 배치 시점은	^그룹웨어 배치 시점은$
+1	TBL_THRM151_AUTH 테이블	\[ORG\]
