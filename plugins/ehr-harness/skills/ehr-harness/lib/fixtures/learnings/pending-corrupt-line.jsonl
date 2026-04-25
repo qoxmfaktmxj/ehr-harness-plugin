@@ -1,0 +1,4 @@
+{"schema_version":1,"ts":"2026-04-21T10:00:00+09:00","kind":"correction","score_delta":1}
+{"schema_version":1,"ts":"2026-04-22T10:00:00+09:00","kind":"success","score_delta":2}
+{not valid json line, should be skipped}
+{"schema_version":1,"ts":"2026-04-24T10:00:00+09:00","kind":"correction","score_delta":1}
