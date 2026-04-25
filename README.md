@@ -1,5 +1,9 @@
 # EHR Harness Plugin
 
+> **현재 릴리즈**: v1.10.0 (2026-04-25)
+> 자세한 변경 이력은 [`plugins/ehr-harness/CHANGELOG.md`](plugins/ehr-harness/CHANGELOG.md) 참조.
+> v1.9.x 이하 history 는 본 README 의 변경 이력 섹션에 그대로 보존된다.
+
 Oracle 프로시저 기반 레거시 인사시스템(EHR)을 위한 AI 코딩 하네스 자동 생성 플러그인.
 
 "하네스 만들어줘" 한 마디로 EHR 프로젝트를 심층 분석하고, 프로젝트에 맞춤화된 하네스를 자동 생성한다.

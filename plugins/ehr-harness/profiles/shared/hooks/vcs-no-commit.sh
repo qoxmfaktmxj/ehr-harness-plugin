@@ -3,6 +3,7 @@
 # 사용자가 직접 변경 내용을 확인하고 커밋해야 합니다.
 #
 # Fail-closed 원칙: 훅 스크립트 내부 에러 발생 시 exit 2 (차단).
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
 set -u -o pipefail
 trap 'echo "⛔ vcs-no-commit 훅 내부 에러 — 안전을 위해 차단" >&2; exit 2' ERR

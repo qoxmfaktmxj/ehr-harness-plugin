@@ -4,6 +4,7 @@
 #
 # Fail-closed 원칙: 훅 스크립트 내부 에러 발생 시 exit 2 (차단) — 정상 통과는 명시적 exit 0 만.
 # (grep 미매치 exit 1 같은 예상 가능한 실패는 `|| true` 또는 `if`로 감싸므로 ERR trap 은 진짜 버그만 캐치)
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
 set -u -o pipefail
 trap 'echo "⛔ db-read-only 훅 내부 에러 — 안전을 위해 차단" >&2; exit 2' ERR

@@ -6,11 +6,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/db-read-only.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/db-read-only.sh\"",
+            "timeout": 3
           },
           {
             "type": "command",
-            "command": "bash .claude/hooks/vcs-no-commit.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/vcs-no-commit.sh\"",
+            "timeout": 3
           }
         ]
       }
