@@ -181,12 +181,18 @@ if [ ! -f "$MANIFEST" ] && [ "$HAS_HARNESS_TRACE" = "0" ]; then
 elif [ ! -f "$MANIFEST" ] && [ "$HAS_HARNESS_TRACE" = "1" ]; then
   HARNESS_MODE="legacy"
 elif hs_is_legacy "$MANIFEST"; then
-  # 매니페스트 파일은 있으나 schema_version 이 허용 집합(HS_SCHEMA_VERSION_STAMPED="3 4") 이외 → legacy 와 동일 취급
+  # 매니페스트 파일은 있으나 schema_version 이 허용 집합(HS_SCHEMA_VERSION_STAMPED="3 4 5") 이외 → legacy 와 동일 취급
   HARNESS_MODE="legacy"
 elif [ "$USER_TRIGGER_IS_AUDIT" = "1" ]; then
   HARNESS_MODE="audit"
 else
   HARNESS_MODE="stamped"
+fi
+
+# v4 → v5 자동 마이그레이션 (stamped/audit 진입 직전 idempotent).
+# 이미 v5 면 no-op, v3/기타는 본 함수가 그대로 통과시키고 다음 hs_write_manifest 에서 v5 로 stamping.
+if [ "$HARNESS_MODE" = "stamped" ] || [ "$HARNESS_MODE" = "audit" ]; then
+  hs_migrate_v4_to_v5 "$MANIFEST" || true
 fi
 
 echo "HARNESS_MODE=$HARNESS_MODE"
@@ -2109,7 +2115,7 @@ SOURCE_MAP="${SOURCE_MAP}
 profiles/$PROFILE/agents/db-impact-reviewer.md|$PLUGIN_ROOT/profiles/$PROFILE/agents/db-impact-reviewer.md|.claude/agents/db-impact-reviewer.md|.claude/agents/db-impact-reviewer.md"
 ```
 
-→ 다음 Step 4-G 가 확장된 `SOURCE_MAP` 을 순회해 신규 7개 파일의 sha256 을 `outputs[]` 에 담고, `hs_write_manifest` 를 통해 `schema_version: 4` + `ehr_cycle` 필드까지 한 번에 기록한다.
+→ 다음 Step 4-G 가 확장된 `SOURCE_MAP` 을 순회해 신규 7개 파일의 sha256 을 `outputs[]` 에 담고, `hs_write_manifest` 를 통해 `schema_version: 5` + `ehr_cycle` (learnings_meta 포함) 필드까지 한 번에 기록한다.
 
 ---
 

@@ -106,7 +106,7 @@ bucket=$(hs_classify_file "$TMP/manifest.json" "newsrc.txt" "$TMP/missing_src" "
 hs_write_manifest "$TMP/written.json" "1.2.3" "ehr5" '{"a":"sha256:1"}' '{"b":"sha256:2"}'
 [ -f "$TMP/written.json" ] && pass "write_manifest creates file" || fail "write_manifest creates file"
 sv=$(MFP="$TMP/written.json" node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).schema_version)")
-[ "$sv" = "4" ] && pass "write_manifest schema_version (v4)" || fail "write_manifest schema_version (got: $sv, expected 4)"
+[ "$sv" = "5" ] && pass "write_manifest schema_version (v5)" || fail "write_manifest schema_version (got: $sv, expected 5)"
 pv=$(MFP="$TMP/written.json" node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).plugin_version)")
 [ "$pv" = "1.2.3" ] && pass "write_manifest plugin_version" || fail "write_manifest plugin_version (got: $pv)"
 pf=$(MFP="$TMP/written.json" node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).profile)")
@@ -164,11 +164,11 @@ hs_write_manifest \
   '{"ddl_path":"src/main/resources/db/tables","db_access":"available","b3_strategy":"ddl-first"}' \
   '{"enabled":true,"table_path":"src/main/resources/db/tables","procedure_path":null,"function_path":null,"naming_pattern":"{OBJECT_NAME}.sql","header_template_path":null,"existing_tables":["THRM101"]}'
 WRITTEN=$(cat "$TMP_W/HARNESS.json")
-if echo "$WRITTEN" | grep -q '"schema_version": 4' && \
+if echo "$WRITTEN" | grep -q '"schema_version": 5' && \
    echo "$WRITTEN" | grep -q '"auth_service_class": "AuthTableService"' && \
    echo "$WRITTEN" | grep -q '"b3_strategy": "ddl-first"' && \
    echo "$WRITTEN" | grep -q '"enabled": true'; then
-  pass "hs_write_manifest: v2 fields persisted (v4 schema)"
+  pass "hs_write_manifest: v2 fields persisted (v5 schema)"
 else
   fail "hs_write_manifest: v2 fields missing. Got: $WRITTEN"
 fi
@@ -225,11 +225,11 @@ hs_write_manifest \
   '{"enabled":false,"table_path":null,"procedure_path":null,"function_path":null,"naming_pattern":null,"header_template_path":null,"existing_tables":[]}' \
   '{"analyzed_at":"2026-04-15T14:23:01+09:00","module_map":[{"name":"hrm","file_count":120}],"session_vars":["ssnEnterCd"],"authSqlID":[],"law_counts":{"A_direct_controller":45,"B_getData":79,"B_saveData":68,"C_hybrid":12,"D_execPrc":15},"critical_proc_found":["P_CPN_CAL_PAY_MAIN"],"critical_proc_missing":[],"procedure_count":234,"procedure_sample":["P_CPN_CAL_PAY_MAIN"],"trigger_count":18}'
 WRITTEN=$(cat "$TMP_W3/HARNESS.json")
-if echo "$WRITTEN" | grep -q '"schema_version": 4' && \
+if echo "$WRITTEN" | grep -q '"schema_version": 5' && \
    echo "$WRITTEN" | grep -q '"analyzed_at":' && \
    echo "$WRITTEN" | grep -q '"procedure_count": 234' && \
    echo "$WRITTEN" | grep -q '"module_map":'; then
-  pass "hs_write_manifest: v3 analysis 필드 persisted (v4 schema)"
+  pass "hs_write_manifest: v3 analysis 필드 persisted (v5 schema)"
 else
   fail "hs_write_manifest: v3 analysis 필드 missing. Got: $WRITTEN"
 fi
@@ -345,26 +345,35 @@ cat > "$TMP/v3.json" <<'V3_EOF'
 V3_EOF
 hs_is_legacy "$TMP/v3.json"
 [ $? -eq 1 ] \
-  && pass "hs_is_legacy v3: stamped 로 인정 (v4 로 bump 후 마이그레이션 유예)" \
+  && pass "hs_is_legacy v3: stamped 로 인정 (v5 로 bump 후 마이그레이션 유예)" \
   || fail "hs_is_legacy v3: legacy 로 분류됨 — 기존 사용자 혼란 유발"
 
-# v4 매니페스트는 stamped
+# v4 매니페스트는 stamped (v5 도입 후에도 마이그레이션 유예)
 cat > "$TMP/v4.json" <<'V4_EOF'
 {"schema_version":4,"plugin_name":"ehr-harness","plugin_version":"1.9.0","profile":"ehr5","outputs":{},"ehr_cycle":{"version":1,"compounds":[],"promoted":[],"preferences_history":[]}}
 V4_EOF
 hs_is_legacy "$TMP/v4.json"
 [ $? -eq 1 ] \
-  && pass "hs_is_legacy v4: stamped" \
+  && pass "hs_is_legacy v4: stamped (v5 도입 후 마이그레이션 유예)" \
   || fail "hs_is_legacy v4: stamped 여야 함"
 
-# 미래 버전(v5) 은 legacy 로 분류
+# v5 매니페스트는 stamped
 cat > "$TMP/v5.json" <<'V5_EOF'
-{"schema_version":5,"plugin_name":"ehr-harness","plugin_version":"2.0.0","profile":"ehr5","outputs":{}}
+{"schema_version":5,"plugin_name":"ehr-harness","plugin_version":"1.10.1","profile":"ehr5","outputs":{},"ehr_cycle":{"version":1,"compounds":[],"promoted":[],"preferences_history":[],"learnings_meta":{"capture_enabled":true,"staged_nonces":{}}}}
 V5_EOF
 hs_is_legacy "$TMP/v5.json"
+[ $? -eq 1 ] \
+  && pass "hs_is_legacy v5: stamped (current schema)" \
+  || fail "hs_is_legacy v5: stamped 여야 함"
+
+# 미래 버전(v6) 은 legacy 로 분류
+cat > "$TMP/v6.json" <<'V6_EOF'
+{"schema_version":6,"plugin_name":"ehr-harness","plugin_version":"2.0.0","profile":"ehr5","outputs":{}}
+V6_EOF
+hs_is_legacy "$TMP/v6.json"
 [ $? -eq 0 ] \
-  && pass "hs_is_legacy v5: 미래 버전은 legacy 로 분류" \
-  || fail "hs_is_legacy v5: legacy 여야 함"
+  && pass "hs_is_legacy v6: 미래 버전은 legacy 로 분류" \
+  || fail "hs_is_legacy v6: legacy 여야 함"
 
 # hs_get_ehr_cycle: 기존 엔트리 보존
 cat > "$TMP/with_cycle.json" <<'WITH_EOF'
@@ -399,11 +408,25 @@ echo "$CYCLE" | grep -q '"id":"KEEP"' \
   && pass "hs_write_manifest: ehr_cycle 기존값 승계 (null 전달 시)" \
   || fail "hs_write_manifest: ehr_cycle 승계 실패 ($CYCLE)"
 
-# hs_write_manifest: schema_version 이 v4 로 기록됨
+# hs_write_manifest: schema_version 이 v5 로 기록됨
 SV=$(MFP="$TMP/out.json" node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8')).schema_version));")
-[ "$SV" = "4" ] \
-  && pass "hs_write_manifest: schema_version=4 로 기록" \
-  || fail "hs_write_manifest: schema_version=$SV (4 기대)"
+[ "$SV" = "5" ] \
+  && pass "hs_write_manifest: schema_version=5 로 기록" \
+  || fail "hs_write_manifest: schema_version=$SV (5 기대)"
+
+# v5 보강 검증: hs_write_manifest 의 default ehr_cycle 에 learnings_meta 가 자동 주입되는지
+TMP_LM="$(mktemp -d)"
+hs_write_manifest "$TMP_LM/m.json" "1.10.1" "ehr5" '{}' '{}'
+LM_OK=$(MFP="$TMP_LM/m.json" node -e "
+  const m=JSON.parse(require('fs').readFileSync(process.env.MFP,'utf8'));
+  const lm = m && m.ehr_cycle && m.ehr_cycle.learnings_meta;
+  const ok = lm && lm.capture_enabled === true && lm.promotion_policy && lm.staged_nonces;
+  process.stdout.write(ok ? 'ok' : 'BAD');
+")
+[ "$LM_OK" = "ok" ] \
+  && pass "hs_write_manifest: 신규 매니페스트는 learnings_meta 기본값 포함 (v5 정합성)" \
+  || fail "hs_write_manifest: learnings_meta 누락 (got: $LM_OK)"
+rm -rf "$TMP_LM"
 
 # hs_write_manifest: ehr_cycle 명시 값으로 덮어쓰기
 NEW_CYCLE='{"version":1,"compounds":[{"id":"NEW"}],"promoted":[],"preferences_history":[]}'

@@ -6,6 +6,16 @@ v1.9.x 이하 history 는 `README.md` 내 변경 이력 섹션 참조.
 
 ## [Unreleased]
 
+## [1.10.1] — 2026-04-27
+
+### Fixed
+- **HARNESS_SCHEMA v5 정합성 모순 해소** — v1.10.0 은 v5 마이그레이션 함수만 추가됐을 뿐 실제 stamping 은 v4 였던 release integrity 버그. 외부 정적 리뷰에서 발견.
+  - `HS_SCHEMA_VERSION=4` → `5` (신규 매니페스트가 v5 로 stamping)
+  - `HS_SCHEMA_VERSION_STAMPED="3 4"` → `"3 4 5"` (v3/v4 호환 유지하면서 v5 인정)
+  - `hs_write_manifest` default `ehr_cycle` 에 `learnings_meta` 자동 주입 (idempotent — 기존 값 보존)
+  - `hs_migrate_v4_to_v5()` 호출처 wire (Step 0.7 stamped/audit 진입 직전, idempotent)
+  - `HARNESS_SCHEMA.md` / `SKILL.md` 의 v4 표현을 v5 기준으로 정렬
+
 ## [1.10.0] — 2026-04-25
 
 ### Added

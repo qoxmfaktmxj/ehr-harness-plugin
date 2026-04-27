@@ -9,11 +9,11 @@
 
 set -u
 
-HS_SCHEMA_VERSION=4
+HS_SCHEMA_VERSION=5
 # 이전 버전 중 stamped 로 간주하는 값 (마이그레이션 유예).
-# v3 사용자가 v1.9.0 플러그인으로 업데이트했을 때 즉시 legacy 로 재분류되어
-# adopt 플로우에 빠지는 혼란을 막는다. 다음 업데이트 시 매니페스트가 v4 로 갱신된다.
-HS_SCHEMA_VERSION_STAMPED="3 4"
+# v3/v4 사용자가 v1.10+ 플러그인으로 업데이트했을 때 즉시 legacy 로 재분류되어
+# adopt 플로우에 빠지는 혼란을 막는다. 다음 매니페스트 갱신 시 v5 로 stamping.
+HS_SCHEMA_VERSION_STAMPED="3 4 5"
 
 # ── sha256 계산 (cross-platform) ──
 hs_sha256() {
@@ -197,6 +197,24 @@ hs_write_manifest() {
     }
     if (ehrCycle == null) {
       ehrCycle = { version: 1, compounds: [], promoted: [], preferences_history: [] };
+    }
+    // v5 stamping: learnings_meta 없으면 default 주입 (idempotent — 기존 값은 보존).
+    if (!ehrCycle.learnings_meta) {
+      ehrCycle.learnings_meta = {
+        last_harvest_at: null,
+        pending_count: 0,
+        promoted_count: 0,
+        rejected_count: 0,
+        staged_nonces: {},
+        promotion_policy: {
+          success_weight: 2,
+          correction_weight: 1,
+          threshold: 3,
+          distinct_sessions_min: 2,
+          same_session_cap: 2
+        },
+        capture_enabled: true
+      };
     }
     const m={
       schema_version: Number(process.env.SV),
