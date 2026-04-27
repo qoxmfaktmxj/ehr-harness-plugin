@@ -6,6 +6,15 @@ v1.9.x 이하 history 는 `README.md` 내 변경 이력 섹션 참조.
 
 ## [Unreleased]
 
+## [1.10.2] — 2026-04-27
+
+### Fixed
+- **SKILL.md Step 4-G validation 잔여 v4 expected** — `hs_write_manifest` 가 v5 로 stamping 한 직후 검증 블록이 여전히 `schema_version === 4` 를 기대해 정상 매니페스트를 "유효성 검증 실패" 로 경고하던 문제. expected 5 로 정정 + `ehr_cycle.learnings_meta` 존재 확인 추가 + 성공 echo `schema_version=5`.
+- SKILL.md `Step 0.7-C` audit 진입 조건 설명을 `{3, 4}` → `{3, 4, 5}` 로 정합성 정렬.
+
+### Changed
+- README 의 "현재 릴리즈" 헤더 / 목차 / 디렉토리 구조도 / `## 12` 섹션을 v5 기준으로 갱신. v5 신규 단락 (`learnings_meta`) + v4→v5 자동 마이그레이션 설명 추가.
+
 ## [1.10.1] — 2026-04-27
 
 ### Fixed
