@@ -18,12 +18,14 @@ EHR_LEX_CORR_EN='(no[,. ]|undo|revert|wrong|that.s not|nope|go back|cancel)'
 # === 공개 함수 ===
 
 # ehr_classify_signal: 입력 prompt 분류. 출력: success | correction | none
+# 길이 임계는 byte 단위로 측정한다 — bash ${#var} 는 locale 의존이라
+# Windows Git-bash 환경에 따라 character/byte 가 갈려 분류가 비결정적이 된다.
 ehr_classify_signal() {
   local s="$1"
-  local len=${#s}
-  # 제외 1: 길이 < 3
+  local len; len=$(printf '%s' "$s" | wc -c | tr -d ' ')
+  # 제외 1: 길이 < 3 byte
   if [ "$len" -lt 3 ]; then echo none; return 0; fi
-  # 제외 2: 길이 > 500
+  # 제외 2: 길이 > 500 byte (한글 약 165자)
   if [ "$len" -gt 500 ]; then echo none; return 0; fi
   # 제외 3: 순수 URL
   if printf '%s' "$s" | grep -qE '^https?://[^ ]+$'; then echo none; return 0; fi
