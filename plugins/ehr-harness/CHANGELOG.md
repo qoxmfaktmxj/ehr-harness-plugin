@@ -6,6 +6,9 @@ v1.9.x 이하 history 는 `README.md` 내 변경 이력 섹션 참조.
 
 ## [Unreleased]
 
+### Fixed
+- **`.claude-plugin/marketplace.json` 카탈로그 정합성** — entry `version: "1.9.4"` 가 `plugin.json` (`1.10.2`) 와 어긋나 있었고, `metadata.pluginRoot: "./plugins"` 와 `source: "./plugins/ehr-harness"` 의 동시 사용이 spec 상 모호 (해석에 따라 `./plugins/./plugins/ehr-harness` 가능). 단일 출처(`plugin.json::version`) 정책에 따라 entry `version` 제거 + `pluginRoot` 제거 + `source` 는 표준 relative path 유지. Claude Code 공식 문서의 같은 저장소 단일 플러그인 예시 형태로 정렬. 런타임 동작 변경 없음 (plugin.json 우선 정책).
+
 ## [1.10.2] — 2026-04-27
 
 ### Fixed
