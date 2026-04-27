@@ -9,6 +9,31 @@ EHR 프로젝트를 심층 분석하여 맞춤형 AI 코딩 하네스를 자동 
 
 ---
 
+### Self-Evolving Loop (v1.10+)
+
+```
+사용자 발화
+   ↓
+[UserPromptSubmit hook] → redaction → pending.jsonl  (런타임, stdout 0)
+   ↓
+[SessionStart hook] → CLAUDE_ENV_FILE + additionalContext  (런타임, ≤1KB)
+   ↓ (주 1회 명시 호출)
+/ehr-harvest-learnings
+   ↓ → cluster + score(distinct_sessions, cap) + nonce
+.claude/learnings/staged/*.md
+   ↓
+/ehr-harness audit → learnings_drift 표시
+   ↓ 사용자 "예"
+EHR_AUDIT_APPROVED=1 + EHR_NONCE → merge.sh apply_staged
+   ↓ scope 분기
+project-local: AGENTS.md / .claude/skills/ehr-lessons/SKILL.md
+plugin-dev   : profiles/*/skeleton/AGENTS.md.skel / profiles/*/skills/ehr-lessons/SKILL.md
+```
+
+자세한 가드 8종, NONCE 형식, scope 정책은 `lib/HARNESS_SCHEMA.md` 의 v5 섹션 참조.
+
+---
+
 ## Step 0: 플러그인 위치 탐색
 
 ```bash
